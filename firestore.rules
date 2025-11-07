@@ -1,0 +1,26 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // ユーザー認証チェック
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    
+    // 自分のドキュメントかチェック
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+    
+    // ユーザードキュメント
+    match /users/{userId} {
+      allow read: if isAuthenticated();
+      allow write: if isOwner(userId);
+    }
+    
+    // その他のコレクション（必要に応じて追加）
+    match /{document=**} {
+      allow read, write: if false; // デフォルトは全て拒否
+    }
+  }
+}
