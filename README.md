@@ -77,3 +77,23 @@ cd ..
 3. PRテンプレートを作成
 4. 定期的なコードレビュー会を設定
 
+## ⚠️ セキュリティルールについて
+
+### 現在の状態：開発モード
+
+開発中は `firestore.rules` と `storage.rules` がテストモード（全てのアクセスを許可）になっています。
+
+**これは開発・テストを簡単にするためです。**
+
+### 本番リリース前にやること
+
+本番リリース前に、必ずセキュリティルールを厳格なものに変更してください。
+
+1. `firestore.rules` と `storage.rules` のファイル内にコメントで本番用ルールの例があります
+2. コメントを参考に、適切なルールに書き換えてください
+3. デプロイ：
+```bash
+   firebase deploy --only firestore:rules,storage:rules
+```
+
+詳細は[Firebaseセキュリティルールのドキュメント](https://firebase.google.com/docs/firestore/security/get-started)を参照してください。
