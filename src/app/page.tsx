@@ -1,33 +1,38 @@
-'use client';
+"use client";
 
-import { useEffect, useState } from 'react';
-import { db } from '@/config/firebase';
-import { collection, getDocs } from 'firebase/firestore';
+import { useEffect } from 'react';
+import { useRouter } from 'next/navigation';
+import { useAuth } from '@/context/AuthContext'; // 
 
-export default function Home() {
-  const [status, setStatus] = useState('接続中...');
+/**
+ * ルートページ (/)
+ * 認証状態をチェックし、/login または /dashboard にリダイレクトする
+ */
+export default function RootPage() {
+  const { currentUser, loading } = useAuth();
+  const router = useRouter();
 
   useEffect(() => {
-    const testConnection = async () => {
-      try {
-        // Firestoreに接続テスト
-        const testCollection = collection(db, 'test');
-        await getDocs(testCollection);
-        setStatus('✅ Firebase接続成功！');
-      } catch (error) {
-        setStatus('❌ Firebase接続エラー: ' + error);
-      }
-    };
+    // 
+    if (loading) {
+      return; // 
+    }
 
-    testConnection();
-  }, []);
+    if (currentUser) {
+      // 
+      router.push('/dashboard');
+    } else {
+      // 
+      router.push('/login');
+    }
+  }, [currentUser, loading, router]);
 
+  // 
   return (
-    <div className="flex min-h-screen items-center justify-center">
-      <div className="text-center">
-        <h1 className="text-4xl font-bold mb-4">Docupaca</h1>
-        <p className="text-xl">{status}</p>
-      </div>
+    <div className="flex min-h-screen items-center justify-center bg-gray-50">
+      <p className="text-lg text-gray-600">
+        読み込み中...
+      </p>
     </div>
   );
 }
