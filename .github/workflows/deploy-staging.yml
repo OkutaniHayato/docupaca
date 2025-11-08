@@ -51,3 +51,5 @@ jobs:
           firebaseServiceAccount: '${{ secrets.STAGING_FIREBASE_SERVICE_ACCOUNT }}'
           projectId: '${{ secrets.STAGING_FIREBASE_PROJECT_ID }}'
           channelId: live
+        env:
+          FIREBASE_CLI_EXPERIMENTS: webframeworks
