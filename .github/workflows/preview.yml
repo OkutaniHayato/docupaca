@@ -47,3 +47,5 @@ jobs:
           repoToken: '${{ secrets.GITHUB_TOKEN }}'
           firebaseServiceAccount: '${{ secrets.STAGING_FIREBASE_SERVICE_ACCOUNT }}'
           projectId: '${{ secrets.STAGING_FIREBASE_PROJECT_ID }}'
+        env:
+          FIREBASE_CLI_EXPERIMENTS: webframeworks
