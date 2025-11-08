@@ -9,9 +9,7 @@ import {
   doc, 
   getDoc, //
   updateDoc, //
-  serverTimestamp 
 } from 'firebase/firestore'; 
-import { Timestamp } from 'firebase/firestore'; //
 
 /**
  * OCR設定 編集ページ（動的ルート: /edit/[id]）
