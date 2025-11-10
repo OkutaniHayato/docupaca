@@ -22,7 +22,6 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
-
       - name: Create .env.local
         run: |
           echo "NEXT_PUBLIC_FIREBASE_API_KEY=${{ secrets.PROD_FIREBASE_API_KEY }}" >> .env.local
