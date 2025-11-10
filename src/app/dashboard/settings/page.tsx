@@ -13,6 +13,7 @@ import {
   doc, 
   deleteDoc 
 } from 'firebase/firestore'; 
+import { Trash2 } from 'lucide-react'; // 
 
 interface OcrSetting {
   id: string; 
@@ -23,15 +24,14 @@ interface OcrSetting {
 
 /**
  * OCR設定一覧ページ
- * (削除機能を追加)
+ * (UI修正: 設定名クリックで編集、削除ボタンをアイコン化)
  */
 export default function OcrSettingsPage() {
   const [settingsList, setSettingsList] = useState<OcrSetting[]>([]); 
-  const [isLoading, setIsLoading] = useState(true); // 
-  const [isDeleting, setIsDeleting] = useState<string | null>(null); //
+  const [isLoading, setIsLoading] = useState(true); 
+  const [isDeleting, setIsDeleting] = useState<string | null>(null);
   const { currentUser } = useAuth(); 
 
-  // 
   useEffect(() => {
     if (!currentUser) {
       setIsLoading(false);
@@ -39,7 +39,7 @@ export default function OcrSettingsPage() {
     }
 
     const fetchSettings = async () => {
-      setIsLoading(true); // 
+      setIsLoading(true); 
       try {
         const settingsRef = collection(db, "ocr_settings");
         const q = query(settingsRef, where("owner_id", "==", currentUser.uid));
@@ -69,25 +69,22 @@ export default function OcrSettingsPage() {
   }, [currentUser]); 
 
   /**
-   * */
+   * 削除処理
+   */
   const handleDeleteSetting = async (id: string) => {
     if (!window.confirm("この設定を削除してもよろしいですか？この操作は取り消せません。")) {
       return;
     }
 
-    setIsDeleting(id); //
+    setIsDeleting(id); 
     try {
-      // Firestore 
       await deleteDoc(doc(db, "ocr_settings", id));
-      
-      // 
       setSettingsList(prevList => prevList.filter(setting => setting.id !== id));
-
     } catch (error) {
       console.error("Error deleting setting: ", error);
       alert("削除に失敗しました。");
     } finally {
-      setIsDeleting(null); //
+      setIsDeleting(null); 
     }
   };
 
@@ -101,7 +98,6 @@ export default function OcrSettingsPage() {
         
         <Link 
           href="/dashboard/settings/new"
-          // 
           className={`rounded-lg bg-green-800 py-2 px-4 font-semibold text-white hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2 ${isLoading || isDeleting ? 'pointer-events-none opacity-50' : ''}`}
         >
           新規作成
@@ -134,35 +130,39 @@ export default function OcrSettingsPage() {
             ) : (
               settingsList.map((setting) => (
                 <tr key={setting.id} className="border-b hover:bg-gray-50">
-                  <td className="p-3 text-sm font-medium text-green-800">
-                    {setting.name}
+                  
+                  {/* --- 1. 修正点: 設定名をクリックで編集 --- */}
+                  <td className="p-3 text-sm">
+                    <Link 
+                      href={`/dashboard/settings/edit/${setting.id}`} 
+                      className={`font-medium text-green-800 hover:text-green-700 ${isDeleting ? 'pointer-events-none opacity-50' : ''}`}
+                    >
+                      {setting.name}
+                    </Link>
                   </td>
+                  
                   <td className="p-3 text-sm text-gray-700">
                     {setting.model_name}
                   </td>
                   <td className="p-3 text-sm text-gray-500">
                     {setting.created_at.toDate().toLocaleDateString()}
                   </td>
-                  <td className="p-3 text-sm space-x-4">
-                    {/* ---  */}
-                    <Link 
-                      href={`/dashboard/settings/edit/${setting.id}`} 
-                      // 
-                      className={`font-medium text-green-800 hover:text-green-700 ${isDeleting ? 'pointer-events-none opacity-50' : ''}`}
-                    >
-                      編集
-                    </Link>
-                    {/* ---  */}
+                  
+                  {/* --- 2. 修正点: 削除ボタンをアイコン化 --- */}
+                  <td className="p-3 text-sm">
                     <button
                       onClick={() => handleDeleteSetting(setting.id)}
-                      // Error 
                       className="font-medium text-red-600 hover:text-red-500 disabled:opacity-50"
-                      // 
                       disabled={isDeleting === setting.id || isLoading}
                     >
-                      {isDeleting === setting.id ? '削除中...' : '削除'}
+                      {isDeleting === setting.id ? (
+                        <span className="text-xs">削除中...</span>
+                      ) : (
+                        <Trash2 className="h-4 w-4" /> 
+                      )}
                     </button>
                   </td>
+
                 </tr>
               ))
             )}
