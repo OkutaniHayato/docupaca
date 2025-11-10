@@ -4,9 +4,8 @@ import { useState, useEffect } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
 import { db } from '@/config/firebase';
-import { doc, getDoc, updateDoc } from 'firebase/firestore'; 
 
-// 
+import { doc, getDoc, updateDoc } from 'firebase/firestore'; 
 import OcrSettingForm, { OcrSettingFormData } from '../../OcrSettingForm'; 
 
 /**
