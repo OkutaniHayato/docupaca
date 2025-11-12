@@ -2,6 +2,8 @@ import type { Metadata } from "next";
 import "./globals.css";
 // AuthProvider をインポート
 import { AuthProvider } from "@/context/AuthContext";
+import './styles/react-pdf/AnnotationLayer.css'; 
+import './styles/react-pdf/TextLayer.css'; 
 
 export const metadata: Metadata = {
   title: "ドキュパカ！",

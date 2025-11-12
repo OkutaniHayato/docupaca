@@ -21,8 +21,8 @@ import { Document, Page, pdfjs } from 'react-pdf';
 // --- ▲ 修正箇所 ▲ ---
 
 // ★ 2. CSS パス (これらは正しい 'esm' パスです)
-import 'react-pdf/dist/esm/Page/AnnotationLayer.css'; 
-import 'react-pdf/dist/esm/Page/TextLayer.css'; 
+//import 'react-pdf/dist/esm/Page/AnnotationLayer.css'; 
+//import 'react-pdf/dist/esm/Page/TextLayer.css'; 
 
 // ワーカーパス (pdfjs が正しくインポートされていれば、これは機能します)
 pdfjs.GlobalWorkerOptions.workerSrc = `https://cdn.jsdelivr.net/npm/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
