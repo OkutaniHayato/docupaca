@@ -1,31 +1,20 @@
 "use client";
 
-import React, { useState } from 'react'; 
+import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
-import Image from 'next/image'; 
-import { 
-  Sparkles, 
-  X, 
-  ArrowLeftRight, 
-  Image as ImageIcon, 
+import Image from 'next/image';
+import {
+  Sparkles,
+  X,
+  ArrowLeftRight,
+  Image as ImageIcon,
   Check,
   Edit2,
-  Ban 
+  Ban
 } from 'lucide-react';
 
-// --- ▼ 修正箇所 ▼ ---
-// ★ 1.【最重要】'react-pdf' のルートからインポートするように修正
+// react-pdfのインポート
 import { Document, Page, pdfjs } from 'react-pdf';
-// import { Document, Page } from 'react-pdf/dist/cjs/entry.webpack'; // <-- 削除 (エラーの原因)
-// import { pdfjs } from 'react-pdf/dist/cjs/pdf'; // <-- 削除 (上記に統合)
-// --- ▲ 修正箇所 ▲ ---
-
-// ★ 2. CSS パス (これらは正しい 'esm' パスです)
-//import 'react-pdf/dist/esm/Page/AnnotationLayer.css'; 
-//import 'react-pdf/dist/esm/Page/TextLayer.css'; 
-
-// ワーカーパス (pdfjs が正しくインポートされていれば、これは機能します)
-pdfjs.GlobalWorkerOptions.workerSrc = `https://cdn.jsdelivr.net/npm/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
 
 
 // 抽出フィールドの型定義
@@ -151,7 +140,14 @@ export default function OcrSettingForm({
   isLoading,
   saveButtonText = "保存する"
 }: OcrSettingFormProps) {
-  
+
+  // PDF.jsワーカーをクライアントサイドで設定
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      pdfjs.GlobalWorkerOptions.workerSrc = `https://cdn.jsdelivr.net/npm/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
+    }
+  }, []);
+
   const [formData, setFormData] = useState<OcrSettingFormData>(
     initialData || {
       name: '',
@@ -160,8 +156,7 @@ export default function OcrSettingForm({
       extraction_fields: [],
     }
   );
-  
-  // ( ... 残りの State やハンドラ関数は変更なし ... )
+
   const [newFieldName, setNewFieldName] = useState('');
   const [newFieldInstruction, setNewFieldInstruction] = useState('');
 
