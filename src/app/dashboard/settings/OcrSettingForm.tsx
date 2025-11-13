@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
 import dynamic from 'next/dynamic';
@@ -14,15 +14,17 @@ import {
   Ban
 } from 'lucide-react';
 
-// react-pdfを動的インポート（SSR無効化）
-const Document = dynamic(
-  () => import('react-pdf').then((mod) => mod.Document),
-  { ssr: false, loading: () => <p>PDFを読み込んでいます...</p> }
-);
-
-const Page = dynamic(
-  () => import('react-pdf').then((mod) => mod.Page),
-  { ssr: false }
+// PDFプレビューコンポーネントを動的インポート（SSR無効化）
+const PdfPreview = dynamic(
+  () => import('@/components/PdfPreview'),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="flex items-center justify-center py-8">
+        <p className="text-gray-500">PDFを読み込んでいます...</p>
+      </div>
+    )
+  }
 );
 
 
@@ -89,33 +91,18 @@ const PreviewContent = ({
             <p>プレビューする画像またはPDFをアップロードしてください。</p>
           </div>
         ) : (uploadedFile?.type === "application/pdf") ? (
-          <div className="w-full h-full overflow-auto">
-            <Document
-              file={imagePreviewUrl}
-              onLoadSuccess={onPdfLoadSuccess}
-              // ★ 5. 'error: Error' と型を追加
-              onLoadError={(error: Error) => console.error('PDF load error:', error)}
-              className="flex justify-center"
-              loading="PDFを読み込んでいます..."
-            >
-              <Page 
-                pageNumber={1} 
-                width={400} 
-              />
-            </Document>
-            {pdfNumPages && (
-              <p className="text-center text-sm text-gray-500">
-                1 / {pdfNumPages} ページ (プレビューは1ページ目のみ)
-              </p>
-            )}
-          </div>
+          <PdfPreview
+            fileUrl={imagePreviewUrl}
+            onLoadSuccess={onPdfLoadSuccess}
+            width={400}
+          />
         ) : (
           <div className="relative w-full h-full min-h-[400px]">
-            <Image 
-              src={imagePreviewUrl} 
-              alt="帳票プレビュー" 
-              fill 
-              style={{ objectFit: "contain" }} 
+            <Image
+              src={imagePreviewUrl}
+              alt="帳票プレビュー"
+              fill
+              style={{ objectFit: "contain" }}
             />
           </div>
         )}
@@ -149,16 +136,6 @@ export default function OcrSettingForm({
   isLoading,
   saveButtonText = "保存する"
 }: OcrSettingFormProps) {
-
-  // PDF.jsワーカーをクライアントサイドで設定（CDN経由）
-  useEffect(() => {
-    if (typeof window !== 'undefined') {
-      // pdfjs-distをCDNから読み込む
-      import('react-pdf').then((mod) => {
-        mod.pdfjs.GlobalWorkerOptions.workerSrc = `https://cdn.jsdelivr.net/npm/pdfjs-dist@${mod.pdfjs.version}/build/pdf.worker.min.mjs`;
-      });
-    }
-  }, []);
 
   const [formData, setFormData] = useState<OcrSettingFormData>(
     initialData || {
