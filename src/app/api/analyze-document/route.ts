@@ -1,15 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { GoogleGenerativeAI } from '@google/generative-ai';
-import { PDFDocument } from 'pdf-lib';
-
-// Gemini APIの初期化
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || '');
 
 /**
  * PDFの最初のページまたは画像を解析して、OCR設定を自動生成するAPI
  */
 export async function POST(request: NextRequest) {
   try {
+    // 動的インポート（Next.js 16のAPI Routeで必要）
+    const { GoogleGenerativeAI } = await import('@google/generative-ai');
+    const { PDFDocument } = await import('pdf-lib');
+
     const formData = await request.formData();
     const file = formData.get('file') as File;
 
@@ -63,7 +62,17 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // Gemini APIキーを取得
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey) {
+      return NextResponse.json(
+        { error: 'GEMINI_API_KEYが設定されていません' },
+        { status: 500 }
+      );
+    }
+
     // Gemini Vision APIで画像を解析
+    const genAI = new GoogleGenerativeAI(apiKey);
     const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash-exp' });
 
     const prompt = `以下の帳票画像を解析して、OCR抽出設定を生成してください。
