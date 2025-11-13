@@ -70,21 +70,38 @@ const PreviewContent = ({
   isAnalyzing,
 }: PreviewContentProps) => (
     <div className="p-6 bg-white border border-gray-200 rounded-lg shadow-sm h-full">
-      <h3 className="text-lg font-medium text-gray-900">帳票プレビュー</h3>
-      <div className="mt-4">
+      {/* ヘッダー：タイトルとAIボタン */}
+      <div className="flex items-center justify-between mb-4">
+        <h3 className="text-lg font-medium text-gray-900">帳票プレビュー</h3>
+        {uploadedFile && (
+          <button
+            type="button"
+            onClick={onAnalyze}
+            disabled={isAnalyzing}
+            className="flex items-center gap-2 rounded-lg bg-green-700 py-2 px-4 font-semibold text-white hover:bg-green-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+          >
+            <Sparkles className={`h-4 w-4 ${isAnalyzing ? 'animate-spin' : ''}`} />
+            {isAnalyzing ? 'AI解析中...' : 'AIで自動生成'}
+          </button>
+        )}
+      </div>
+
+      {/* ファイルアップロード */}
+      <div className="mb-4">
         <label htmlFor="file-upload" className="block text-sm font-medium text-gray-700">
           帳票ファイル (画像 / PDF)
         </label>
-        <input 
-          id="file-upload" 
-          type="file" 
+        <input
+          id="file-upload"
+          type="file"
           accept="image/*,application/pdf"
           onChange={handleFileChange}
           className="mt-1 block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-green-100 file:text-green-800 hover:file:bg-green-200 disabled:opacity-50"
         />
       </div>
-      
-      <div className="relative mt-4 border border-gray-300 rounded-md bg-gray-50 min-h-[400px] max-h-[600px] flex items-center justify-center overflow-hidden">
+
+      {/* プレビューエリア（A4サイズに対応） */}
+      <div className="relative border border-gray-300 rounded-md bg-gray-50 min-h-[842px] max-h-[1000px] flex items-center justify-center overflow-hidden">
         {!imagePreviewUrl ? (
           <div className="text-center text-gray-500">
             <ImageIcon className="mx-auto h-12 w-12 text-gray-400" />
@@ -94,10 +111,10 @@ const PreviewContent = ({
           <PdfPreview
             fileUrl={imagePreviewUrl}
             onLoadSuccess={onPdfLoadSuccess}
-            width={400}
+            width={595}
           />
         ) : (
-          <div className="relative w-full h-full min-h-[400px]">
+          <div className="relative w-full h-full min-h-[800px]">
             <Image
               src={imagePreviewUrl}
               alt="帳票プレビュー"
@@ -108,21 +125,11 @@ const PreviewContent = ({
         )}
       </div>
 
+      {/* 説明テキスト */}
       {uploadedFile && (
-        <div className="mt-4">
-          <button
-            type="button"
-            onClick={onAnalyze}
-            disabled={isAnalyzing}
-            className="w-full flex items-center justify-center rounded-lg bg-green-700 py-3 px-4 font-semibold text-white hover:bg-green-600 disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            <Sparkles className={`mr-2 h-5 w-5 ${isAnalyzing ? 'animate-spin' : ''}`} />
-            {isAnalyzing ? 'AI解析中...' : 'AIで設定を自動生成'}
-          </button>
-          <p className="mt-2 text-xs text-gray-500 text-center">
-            アップロードした帳票をAIが解析し、OCR設定を自動生成します
-          </p>
-        </div>
+        <p className="mt-3 text-xs text-gray-500 text-center">
+          アップロードした帳票をAIが解析し、OCR設定を自動生成します
+        </p>
       )}
     </div>
 );
