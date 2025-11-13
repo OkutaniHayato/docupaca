@@ -3,6 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
+import dynamic from 'next/dynamic';
 import {
   Sparkles,
   X,
@@ -13,8 +14,16 @@ import {
   Ban
 } from 'lucide-react';
 
-// react-pdfのインポート
-import { Document, Page, pdfjs } from 'react-pdf';
+// react-pdfを動的インポート（SSR無効化）
+const Document = dynamic(
+  () => import('react-pdf').then((mod) => mod.Document),
+  { ssr: false, loading: () => <p>PDFを読み込んでいます...</p> }
+);
+
+const Page = dynamic(
+  () => import('react-pdf').then((mod) => mod.Page),
+  { ssr: false }
+);
 
 
 // 抽出フィールドの型定義
@@ -141,10 +150,13 @@ export default function OcrSettingForm({
   saveButtonText = "保存する"
 }: OcrSettingFormProps) {
 
-  // PDF.jsワーカーをクライアントサイドで設定
+  // PDF.jsワーカーをクライアントサイドで設定（CDN経由）
   useEffect(() => {
     if (typeof window !== 'undefined') {
-      pdfjs.GlobalWorkerOptions.workerSrc = `https://cdn.jsdelivr.net/npm/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
+      // pdfjs-distをCDNから読み込む
+      import('react-pdf').then((mod) => {
+        mod.pdfjs.GlobalWorkerOptions.workerSrc = `https://cdn.jsdelivr.net/npm/pdfjs-dist@${mod.pdfjs.version}/build/pdf.worker.min.mjs`;
+      });
     }
   }, []);
 
