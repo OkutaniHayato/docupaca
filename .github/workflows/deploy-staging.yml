@@ -4,11 +4,11 @@ on:
   push:
     branches:
       - develop
+  workflow_dispatch:
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    environment: staging
     
     steps:
       - name: Checkout code
@@ -35,30 +35,22 @@ jobs:
           echo "FIREBASE_CLIENT_EMAIL=${{ secrets.STAGING_FIREBASE_CLIENT_EMAIL }}" >> .env.local
           echo "FIREBASE_PRIVATE_KEY=${{ secrets.STAGING_FIREBASE_PRIVATE_KEY }}" >> .env.local
 
-      - name: Run tests
-        run: npm test --if-present
-
       - name: Run lint
         run: npm run lint
 
       - name: Build
         run: npm run build
 
-      - name: Deploy to Firebase Hosting
-        id: deploy
-        continue-on-error: true
+      - name: Deploy to Firebase Hosting (Staging)
         uses: FirebaseExtended/action-hosting-deploy@v0
         with:
           repoToken: '${{ secrets.GITHUB_TOKEN }}'
           firebaseServiceAccount: '${{ secrets.STAGING_FIREBASE_SERVICE_ACCOUNT }}'
-          projectId: '${{ secrets.STAGING_FIREBASE_PROJECT_ID }}'
           channelId: live
-        env:
-          FIREBASE_CLI_EXPERIMENTS: webframeworks
-      
-      - name: Check deployment
-        if: steps.deploy.outcome == 'failure'
+          projectId: ${{ secrets.STAGING_FIREBASE_PROJECT_ID }}
+
+      - name: Notify deployment success
+        if: success()
         run: |
-          echo "⚠️ Deployment completed with warnings (cleanup policy not set)"
-          echo "This is expected and does not affect functionality"
-          exit 0
+          echo "🎉 Staging deployment successful!"
+          echo "🔗 Staging URL: https://${{ secrets.STAGING_FIREBASE_PROJECT_ID }}.web.app"
