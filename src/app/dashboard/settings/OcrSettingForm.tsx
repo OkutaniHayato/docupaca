@@ -54,6 +54,8 @@ interface PreviewContentProps {
   uploadedFile: File | null;
   pdfNumPages: number | null;
   onPdfLoadSuccess: ({ numPages }: { numPages: number }) => void;
+  onAnalyze: () => void;
+  isAnalyzing: boolean;
 }
 
 // --- プレビューエリア（UI） ---
@@ -64,6 +66,8 @@ const PreviewContent = ({
   uploadedFile,
   pdfNumPages,
   onPdfLoadSuccess,
+  onAnalyze,
+  isAnalyzing,
 }: PreviewContentProps) => (
     <div className="p-6 bg-white border border-gray-200 rounded-lg shadow-sm h-full">
       <h3 className="text-lg font-medium text-gray-900">帳票プレビュー</h3>
@@ -118,6 +122,23 @@ const PreviewContent = ({
           </div>
         )}
       </div>
+
+      {uploadedFile && (
+        <div className="mt-4">
+          <button
+            type="button"
+            onClick={onAnalyze}
+            disabled={isAnalyzing}
+            className="w-full flex items-center justify-center rounded-lg bg-green-700 py-3 px-4 font-semibold text-white hover:bg-green-600 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            <Sparkles className={`mr-2 h-5 w-5 ${isAnalyzing ? 'animate-spin' : ''}`} />
+            {isAnalyzing ? 'AI解析中...' : 'AIで設定を自動生成'}
+          </button>
+          <p className="mt-2 text-xs text-gray-500 text-center">
+            アップロードした帳票をAIが解析し、OCR設定を自動生成します
+          </p>
+        </div>
+      )}
     </div>
 );
 
@@ -148,10 +169,11 @@ export default function OcrSettingForm({
   const [uploadedFile, setUploadedFile] = useState<File | null>(null);
   const [imagePreviewUrl, setImagePreviewUrl] = useState<string | null>(null);
 
-  const [editingField, setEditingField] = useState<string | null>(null); 
-  const [tempEditInstruction, setTempEditInstruction] = useState(''); 
-  
+  const [editingField, setEditingField] = useState<string | null>(null);
+  const [tempEditInstruction, setTempEditInstruction] = useState('');
+
   const [pdfNumPages, setPdfNumPages] = useState<number | null>(null);
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
 
   const handleChange = (
     e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>
@@ -210,8 +232,49 @@ export default function OcrSettingForm({
       alert("先に帳票ファイル（画像またはPDF）をアップロードしてください。");
       return;
     }
-    console.log("AIによる自動生成を開始 (ファイル:", uploadedFile.name, ")");
-    // ( ... AI生成ロジック ... )
+
+    setIsAnalyzing(true);
+
+    try {
+      // FormDataを作成してファイルを送信
+      const formData = new FormData();
+      formData.append('file', uploadedFile);
+
+      const response = await fetch('/api/analyze-document', {
+        method: 'POST',
+        body: formData,
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || '解析に失敗しました');
+      }
+
+      const result = await response.json();
+
+      if (result.success && result.data) {
+        // 設定名を自動入力（帳票名から生成）
+        setFormData(prev => ({
+          ...prev,
+          name: `${result.data.documentName}の設定`,
+          prompt_text: result.data.extractionInstruction,
+          extraction_fields: result.data.extractionFields,
+        }));
+
+        alert('AI解析が完了しました！設定が自動入力されました。');
+      } else {
+        throw new Error('解析結果が不正です');
+      }
+    } catch (error) {
+      console.error('AI解析エラー:', error);
+      alert(
+        `AI解析中にエラーが発生しました: ${
+          error instanceof Error ? error.message : '不明なエラー'
+        }`
+      );
+    } finally {
+      setIsAnalyzing(false);
+    }
   };
 
   const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
@@ -291,15 +354,15 @@ export default function OcrSettingForm({
           <label htmlFor="prompt_text" className="block text-sm font-medium text-gray-700">
             抽出指示（チャット形式）
           </label>
-          <button 
-            type="button" 
+          <button
+            type="button"
             onClick={handleAiGenerate}
             className="flex items-center text-sm text-green-700 hover:text-green-600 disabled:opacity-50"
-            disabled={isLoading || !uploadedFile}
+            disabled={isLoading || !uploadedFile || isAnalyzing}
             title={!uploadedFile ? "先にファイルをアップロードしてください" : "AIで抽出指示を自動生成"}
           >
-            <Sparkles className="mr-1 h-4 w-4" />
-            AIで自動生成
+            <Sparkles className={`mr-1 h-4 w-4 ${isAnalyzing ? 'animate-spin' : ''}`} />
+            {isAnalyzing ? '解析中...' : 'AIで自動生成'}
           </button>
         </div>
         <textarea
@@ -319,15 +382,15 @@ export default function OcrSettingForm({
           <label className="block text-sm font-medium text-gray-700">
             抽出フィールド (手動追加)
           </label>
-          <button 
-            type="button" 
+          <button
+            type="button"
             onClick={handleAiGenerate}
             className="flex items-center text-sm text-green-700 hover:text-green-600 disabled:opacity-50"
-            disabled={isLoading || !uploadedFile}
+            disabled={isLoading || !uploadedFile || isAnalyzing}
             title={!uploadedFile ? "先にファイルをアップロードしてください" : "AIで抽出指示を自動生成"}
           >
-            <Sparkles className="mr-1 h-4 w-4" />
-            AIで自動生成
+            <Sparkles className={`mr-1 h-4 w-4 ${isAnalyzing ? 'animate-spin' : ''}`} />
+            {isAnalyzing ? '解析中...' : 'AIで自動生成'}
           </button>
         </div>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-2">
@@ -480,12 +543,14 @@ export default function OcrSettingForm({
         </div>
         <div className={`${layout === 'form-left' ? 'order-2' : 'order-1'}`}>
           {/* ★ 9. Props から layout/setLayout を削除 */}
-          <PreviewContent 
+          <PreviewContent
             handleFileChange={handleFileChange}
             imagePreviewUrl={imagePreviewUrl}
             uploadedFile={uploadedFile}
             pdfNumPages={pdfNumPages}
             onPdfLoadSuccess={onPdfLoadSuccess}
+            onAnalyze={handleAiGenerate}
+            isAnalyzing={isAnalyzing}
           />
         </div>
       </div>
