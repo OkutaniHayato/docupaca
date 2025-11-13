@@ -47,12 +47,10 @@ interface OcrSettingFormProps {
   saveButtonText?: string;
 }
 
-// ★ 3. Props から 'layout' と 'setLayout' を削除
 interface PreviewContentProps {
   handleFileChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
   imagePreviewUrl: string | null;
   uploadedFile: File | null;
-  pdfNumPages: number | null;
   onPdfLoadSuccess: ({ numPages }: { numPages: number }) => void;
   onAnalyze: () => void;
   isAnalyzing: boolean;
@@ -60,11 +58,9 @@ interface PreviewContentProps {
 
 // --- プレビューエリア（UI） ---
 const PreviewContent = ({
-  // ★ 4. 引数から 'layout' と 'setLayout' を削除
   handleFileChange,
   imagePreviewUrl,
   uploadedFile,
-  pdfNumPages,
   onPdfLoadSuccess,
   onAnalyze,
   isAnalyzing,
@@ -163,7 +159,6 @@ export default function OcrSettingForm({
   const [editingField, setEditingField] = useState<string | null>(null);
   const [tempEditInstruction, setTempEditInstruction] = useState('');
 
-  const [pdfNumPages, setPdfNumPages] = useState<number | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
 
   const handleChange = (
@@ -176,8 +171,7 @@ export default function OcrSettingForm({
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
-      setUploadedFile(file);
-      setPdfNumPages(null); 
+      setUploadedFile(file); 
 
       if (imagePreviewUrl) {
         URL.revokeObjectURL(imagePreviewUrl);
@@ -193,7 +187,8 @@ export default function OcrSettingForm({
   };
 
   const onPdfLoadSuccess = ({ numPages }: { numPages: number }) => {
-    setPdfNumPages(numPages);
+    // PDF読み込み成功時のコールバック（現在は特に処理なし）
+    console.log(`PDF loaded: ${numPages} pages`);
   };
 
   const handleAddField = () => {
@@ -533,12 +528,10 @@ export default function OcrSettingForm({
           {FormContent}
         </div>
         <div className={`${layout === 'form-left' ? 'order-2' : 'order-1'}`}>
-          {/* ★ 9. Props から layout/setLayout を削除 */}
           <PreviewContent
             handleFileChange={handleFileChange}
             imagePreviewUrl={imagePreviewUrl}
             uploadedFile={uploadedFile}
-            pdfNumPages={pdfNumPages}
             onPdfLoadSuccess={onPdfLoadSuccess}
             onAnalyze={handleAiGenerate}
             isAnalyzing={isAnalyzing}
