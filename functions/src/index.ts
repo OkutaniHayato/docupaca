@@ -359,7 +359,7 @@ export const ocrApi = functions.https.onRequest(
       let fileBuffer: Buffer;
       try {
         fileBuffer = Buffer.from(file, 'base64');
-      } catch (error) {
+      } catch {
         await historyRef.update({
           status: 'failed',
           error_message: 'Invalid base64 file data',

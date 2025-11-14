@@ -116,7 +116,6 @@ const PreviewContent = ({
           <PdfPreview
             fileUrl={imagePreviewUrl}
             onLoadSuccess={onPdfLoadSuccess}
-            width={595}
           />
         ) : (
           <div className="relative w-full h-full min-h-[800px]">
