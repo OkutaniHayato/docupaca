@@ -3,7 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import { useParams } from 'next/navigation';
 import Image from 'next/image';
-import PdfPreview from '@/components/PdfPreview';
+import PdfToImagePreview from '@/components/PdfToImagePreview';
 import { useAuth } from '@/context/AuthContext';
 import { db, storage } from '@/config/firebase';
 import { doc, getDoc } from 'firebase/firestore';
@@ -222,13 +222,12 @@ export default function HistoryDetailPage() {
           {history.imageUrl ? (
             <>
               {getFileType(history.original_file_path) === 'pdf' ? (
-                // PDFの場合はPdfPreviewコンポーネントを使用（iframeベース）
+                // PDFの場合はPdfToImagePreviewコンポーネントを使用（Canvas変換＋ハイライト）
                 <div className="relative w-full">
-                  <PdfPreview fileUrl={history.imageUrl} />
-                  <div className="mt-4 p-3 bg-blue-50 border border-blue-200 rounded text-sm text-blue-800">
-                    <p className="font-medium mb-1">PDFのハイライト表示について</p>
-                    <p>現在、PDFファイルのハイライト表示はNext.js 16の制約により対応していません。画像ファイル（PNG/JPEG）でアップロードすると、ハイライト表示が利用できます。抽出結果は右側の表に表示されます。</p>
-                  </div>
+                  <PdfToImagePreview
+                    fileUrl={history.imageUrl}
+                    extractedData={history.extracted_data}
+                  />
                 </div>
               ) : (
                 // 画像の場合はImageコンポーネントとハイライトを使用
