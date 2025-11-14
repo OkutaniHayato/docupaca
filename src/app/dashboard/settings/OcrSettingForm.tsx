@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
 import dynamic from 'next/dynamic';
@@ -92,6 +92,7 @@ const PreviewContent = ({
           type="file"
           accept="image/*,application/pdf"
           onChange={handleFileChange}
+          disabled={isAnalyzing}
           className="mt-1 block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-green-100 file:text-green-800 hover:file:bg-green-200 disabled:opacity-50"
         />
       </div>
@@ -149,6 +150,13 @@ export default function OcrSettingForm({
     }
   );
 
+  // initialDataが変更されたときにformDataを更新
+  useEffect(() => {
+    if (initialData) {
+      setFormData(initialData);
+    }
+  }, [initialData]);
+
   const [newFieldName, setNewFieldName] = useState('');
   const [newFieldInstruction, setNewFieldInstruction] = useState('');
 
@@ -170,19 +178,22 @@ export default function OcrSettingForm({
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
+    console.log('ファイルが選択されました:', file);
     if (file) {
-      setUploadedFile(file); 
+      setUploadedFile(file);
 
       if (imagePreviewUrl) {
         URL.revokeObjectURL(imagePreviewUrl);
       }
-      
+
       const newPreviewUrl = URL.createObjectURL(file);
       setImagePreviewUrl(newPreviewUrl);
+      console.log('プレビューURLを設定しました:', newPreviewUrl);
 
     } else {
       setUploadedFile(null);
       setImagePreviewUrl(null);
+      console.log('ファイルがクリアされました');
     }
   };
 
