@@ -17,12 +17,6 @@ const nextConfig: NextConfig = {
       'pdf-lib',
     ],
   },
-  // react-pdf用のWebpack設定
-  webpack: (config: any) => {
-    // canvasモジュールをクライアントサイドで無効化
-    config.resolve.alias.canvas = false;
-    return config;
-  },
 };
 
 export default nextConfig;
