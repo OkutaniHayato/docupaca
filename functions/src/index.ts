@@ -2,6 +2,7 @@ import * as functions from 'firebase-functions/v2';
 import * as admin from 'firebase-admin';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { defineSecret } from 'firebase-functions/params';
+import * as crypto from 'crypto';
 
 // Firebase Admin初期化
 admin.initializeApp();
@@ -12,6 +13,28 @@ const geminiApiKey = defineSecret('GEMINI_API_KEY');
 // Firestore, Storageインスタンス
 const db = admin.firestore();
 const storage = admin.storage();
+
+// APIキーのハッシュを検証する関数
+async function verifyApiKey(apiKey: string): Promise<string | null> {
+  const keyHash = crypto.createHash('sha256').update(apiKey).digest('hex');
+
+  try {
+    const keysSnapshot = await db.collection('api_keys')
+      .where('key_hash', '==', keyHash)
+      .limit(1)
+      .get();
+
+    if (keysSnapshot.empty) {
+      return null;
+    }
+
+    const keyDoc = keysSnapshot.docs[0];
+    return keyDoc.data().user_id;
+  } catch (error) {
+    functions.logger.error('API key verification error:', error);
+    return null;
+  }
+}
 
 // OCR設定のデータ型
 interface OcrSetting {
@@ -226,6 +249,226 @@ ${extractionFieldsDescription}
         'internal',
         `OCR処理中にエラーが発生しました: ${error instanceof Error ? error.message : String(error)}`
       );
+    }
+  }
+);
+
+/**
+ * 外部API連携用のHTTP OCRエンドポイント
+ *
+ * APIキーで認証し、指定されたOCR設定を使用してドキュメントを処理します。
+ *
+ * リクエスト:
+ * - Headers: Authorization: Bearer <API_KEY>
+ * - Body (JSON):
+ *   - setting_id: OCR設定ID
+ *   - file: Base64エンコードされたファイルデータ
+ *   - filename: ファイル名（オプション）
+ *
+ * レスポンス:
+ * - 成功: { success: true, history_id: string, extracted_data: object }
+ * - エラー: { success: false, error: string }
+ */
+export const ocrApi = functions.https.onRequest(
+  {
+    region: 'asia-northeast1',
+    secrets: [geminiApiKey],
+    timeoutSeconds: 540,
+    memory: '1GiB',
+    cors: true, // CORSを有効化
+  },
+  async (req, res) => {
+    // CORSヘッダーを設定
+    res.set('Access-Control-Allow-Origin', '*');
+    res.set('Access-Control-Allow-Methods', 'POST, OPTIONS');
+    res.set('Access-Control-Allow-Headers', 'Authorization, Content-Type');
+
+    // OPTIONSリクエスト（プリフライト）への対応
+    if (req.method === 'OPTIONS') {
+      res.status(204).send('');
+      return;
+    }
+
+    // POSTメソッドのみ許可
+    if (req.method !== 'POST') {
+      res.status(405).json({ success: false, error: 'Method not allowed. Use POST.' });
+      return;
+    }
+
+    try {
+      // 1. APIキー認証
+      const authHeader = req.headers.authorization;
+      if (!authHeader || !authHeader.startsWith('Bearer ')) {
+        res.status(401).json({ success: false, error: 'Authorization header missing or invalid' });
+        return;
+      }
+
+      const apiKey = authHeader.substring(7); // "Bearer " を除去
+      const userId = await verifyApiKey(apiKey);
+
+      if (!userId) {
+        res.status(401).json({ success: false, error: 'Invalid API key' });
+        return;
+      }
+
+      functions.logger.info(`API request authenticated for user: ${userId}`);
+
+      // 2. リクエストボディの検証
+      const { setting_id, file, filename } = req.body;
+
+      if (!setting_id || !file) {
+        res.status(400).json({
+          success: false,
+          error: 'Missing required parameters: setting_id and file (base64 encoded)'
+        });
+        return;
+      }
+
+      // 3. OCR設定を取得
+      const settingDoc = await db.collection('ocr_settings').doc(setting_id).get();
+
+      if (!settingDoc.exists) {
+        res.status(404).json({ success: false, error: 'OCR setting not found' });
+        return;
+      }
+
+      const setting = settingDoc.data() as OcrSetting;
+
+      // 権限チェック
+      if (setting.owner_id !== userId) {
+        res.status(403).json({
+          success: false,
+          error: 'Permission denied: You do not own this OCR setting'
+        });
+        return;
+      }
+
+      functions.logger.info(`OCR setting found: ${setting.name}`);
+
+      // 4. ocr_historyに初期レコードを作成
+      const historyRef = await db.collection('ocr_history').add({
+        setting_id,
+        status: 'processing',
+        original_file_path: filename || 'api_upload',
+        executed_at: admin.firestore.Timestamp.now(),
+      } as Partial<OcrHistory>);
+
+      functions.logger.info(`OCR processing started: history_id=${historyRef.id}`);
+
+      // 5. Base64ファイルをデコード
+      let fileBuffer: Buffer;
+      try {
+        fileBuffer = Buffer.from(file, 'base64');
+      } catch (error) {
+        await historyRef.update({
+          status: 'failed',
+          error_message: 'Invalid base64 file data',
+        });
+        res.status(400).json({ success: false, error: 'Invalid base64 file data' });
+        return;
+      }
+
+      // MIMEタイプを推測（シンプルな実装）
+      let mimeType = 'application/octet-stream';
+      if (filename) {
+        if (filename.endsWith('.pdf')) {
+          mimeType = 'application/pdf';
+        } else if (filename.endsWith('.png')) {
+          mimeType = 'image/png';
+        } else if (filename.endsWith('.jpg') || filename.endsWith('.jpeg')) {
+          mimeType = 'image/jpeg';
+        }
+      }
+
+      functions.logger.info(`File decoded: size=${fileBuffer.length} bytes, mimeType=${mimeType}`);
+
+      // 6. Gemini APIで処理
+      const apiKeyValue = geminiApiKey.value();
+      if (!apiKeyValue) {
+        throw new Error('GEMINI_API_KEY not configured');
+      }
+
+      const genAI = new GoogleGenerativeAI(apiKeyValue);
+      const model = genAI.getGenerativeModel({ model: setting.model_name });
+
+      // プロンプト作成
+      const extractionFieldsDescription = setting.extraction_fields
+        .map(field => `- ${field.name}: ${field.instruction}`)
+        .join('\n');
+
+      const prompt = `${setting.prompt_text}
+
+【抽出項目】
+${extractionFieldsDescription}
+
+【出力形式】
+以下のJSON形式で出力してください。JSONのみを出力し、他の説明文は含めないでください。
+
+{
+  "${setting.extraction_fields[0]?.name || 'fieldName'}": {
+    "value": "抽出された値",
+    "bbox": [x1, y1, x2, y2]
+  }
+}
+
+各フィールドについて、valueには抽出された値を、bboxには該当箇所の座標を[左上x, 左上y, 右下x, 右下y]の形式で記載してください。
+座標が不明な場合は[0, 0, 0, 0]としてください。`;
+
+      functions.logger.info('Calling Gemini API...');
+
+      // Gemini APIリクエスト
+      const imagePart = {
+        inlineData: {
+          data: fileBuffer.toString('base64'),
+          mimeType: mimeType,
+        },
+      };
+
+      const result = await model.generateContent([imagePart, prompt]);
+      const response = await result.response;
+      const text = response.text();
+
+      functions.logger.info('Gemini API response received');
+
+      // 7. レスポンスをパース
+      let extractedData: OcrHistory['extracted_data'];
+      try {
+        const cleanedText = text.replace(/```json\n?|\n?```/g, '').trim();
+        extractedData = JSON.parse(cleanedText);
+      } catch (error) {
+        functions.logger.error('JSON parsing error:', error);
+        await historyRef.update({
+          status: 'failed',
+          error_message: `Failed to parse Gemini response: ${text.substring(0, 200)}`,
+        });
+        res.status(500).json({
+          success: false,
+          error: 'Failed to parse OCR response'
+        });
+        return;
+      }
+
+      // 8. ocr_historyを更新（成功）
+      await historyRef.update({
+        status: 'completed',
+        extracted_data: extractedData,
+      });
+
+      functions.logger.info(`OCR processing completed: history_id=${historyRef.id}`);
+
+      // 9. 成功レスポンスを返す
+      res.status(200).json({
+        success: true,
+        history_id: historyRef.id,
+        extracted_data: extractedData,
+      });
+
+    } catch (error) {
+      functions.logger.error('OCR API error:', error);
+      res.status(500).json({
+        success: false,
+        error: error instanceof Error ? error.message : 'Internal server error',
+      });
     }
   }
 );

@@ -14,7 +14,7 @@ import {
   doc,
   deleteDoc
 } from 'firebase/firestore';
-import { Copy, Trash2, Info, Key } from 'lucide-react';
+import { Copy, Trash2, Info, Key, Code } from 'lucide-react';
 
 interface ApiKeyMeta {
   id: string;
@@ -43,13 +43,65 @@ export default function ApiKeysPage() {
   const [newKey, setNewKey] = useState<string | null>(null); // モーダル表示用
   const [showModal, setShowModal] = useState(false);
   const [copiedKeyId, setCopiedKeyId] = useState<string | null>(null);
+  const [selectedExample, setSelectedExample] = useState<'curl' | 'gas'>('curl');
   const { currentUser } = useAuth();
 
   // プロジェクトIDから Cloud Functions のエンドポイントURLを生成
   const projectId = process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID || 'your-project-id';
   const functionRegion = 'asia-northeast1';
-  const functionName = 'executeOcr';
+  const functionName = 'ocrApi';
   const apiEndpoint = `https://${functionRegion}-${projectId}.cloudfunctions.net/${functionName}`;
+
+  // コード例を生成
+  const curlExample = `# PDFファイルをBase64エンコードしてOCR処理を実行
+curl -X POST "${apiEndpoint}" \\
+  -H "Authorization: Bearer YOUR_API_KEY" \\
+  -H "Content-Type: application/json" \\
+  -d '{
+    "setting_id": "YOUR_OCR_SETTING_ID",
+    "file": "'$(base64 -w 0 document.pdf)'",
+    "filename": "document.pdf"
+  }'`;
+
+  const gasExample = `function executeOcr() {
+  const API_KEY = "YOUR_API_KEY";
+  const SETTING_ID = "YOUR_OCR_SETTING_ID";
+  const API_ENDPOINT = "${apiEndpoint}";
+
+  // Google DriveからファイルをBase64エンコード
+  const fileId = "YOUR_GOOGLE_DRIVE_FILE_ID";
+  const file = DriveApp.getFileById(fileId);
+  const blob = file.getBlob();
+  const base64 = Utilities.base64Encode(blob.getBytes());
+
+  // APIリクエストを送信
+  const options = {
+    method: "post",
+    headers: {
+      "Authorization": "Bearer " + API_KEY,
+      "Content-Type": "application/json"
+    },
+    payload: JSON.stringify({
+      setting_id: SETTING_ID,
+      file: base64,
+      filename: file.getName()
+    }),
+    muteHttpExceptions: true
+  };
+
+  const response = UrlFetchApp.fetch(API_ENDPOINT, options);
+  const result = JSON.parse(response.getContentText());
+
+  if (result.success) {
+    Logger.log("OCR処理成功!");
+    Logger.log("History ID: " + result.history_id);
+    Logger.log("抽出データ: " + JSON.stringify(result.extracted_data, null, 2));
+    return result.extracted_data;
+  } else {
+    Logger.log("エラー: " + result.error);
+    throw new Error(result.error);
+  }
+}`;
 
   // APIキー一覧を取得
   useEffect(() => {
@@ -226,6 +278,77 @@ export default function ApiKeysPage() {
               </div>
             </div>
           </div>
+        </div>
+      </div>
+
+      {/* API使用例エリア */}
+      <div className="rounded-lg border border-gray-200 bg-white shadow-sm p-6">
+        <div className="flex items-start gap-3 mb-4">
+          <Code className="h-5 w-5 text-[#166534] mt-0.5 flex-shrink-0" />
+          <div className="flex-1">
+            <h3 className="font-semibold text-gray-800 mb-1">API使用例</h3>
+            <p className="text-sm text-gray-600">
+              発行したAPIキーを使用してOCR処理を実行するコード例です。
+              <strong className="text-gray-800"> setting_id</strong> には、「OCR設定」ページで作成した設定のIDを指定してください。
+            </p>
+          </div>
+        </div>
+
+        {/* タブ切り替え */}
+        <div className="flex gap-2 mb-4 border-b border-gray-200">
+          <button
+            onClick={() => setSelectedExample('curl')}
+            className={`px-4 py-2 font-medium text-sm transition-colors ${
+              selectedExample === 'curl'
+                ? 'text-[#166534] border-b-2 border-[#166534]'
+                : 'text-gray-600 hover:text-gray-800'
+            }`}
+          >
+            cURL (Linux/Mac)
+          </button>
+          <button
+            onClick={() => setSelectedExample('gas')}
+            className={`px-4 py-2 font-medium text-sm transition-colors ${
+              selectedExample === 'gas'
+                ? 'text-[#166534] border-b-2 border-[#166534]'
+                : 'text-gray-600 hover:text-gray-800'
+            }`}
+          >
+            Google Apps Script
+          </button>
+        </div>
+
+        {/* コード表示エリア */}
+        <div className="relative">
+          <pre className="bg-gray-900 text-gray-100 rounded-md p-4 overflow-x-auto text-sm font-mono">
+            <code>{selectedExample === 'curl' ? curlExample : gasExample}</code>
+          </pre>
+          <button
+            onClick={() => handleCopy(selectedExample === 'curl' ? curlExample : gasExample, 'example')}
+            className="absolute top-2 right-2 flex items-center gap-1.5 rounded-md bg-gray-700 hover:bg-gray-600 px-3 py-1.5 text-xs font-medium text-white transition-colors"
+          >
+            <Copy className="h-3 w-3" />
+            {copiedKeyId === 'example' ? 'コピーしました！' : 'コピー'}
+          </button>
+        </div>
+
+        {/* 注意事項 */}
+        <div className="mt-4 bg-blue-50 border border-blue-200 rounded-md p-4">
+          <p className="text-sm text-blue-900 font-medium mb-2">📝 パラメータの説明</p>
+          <ul className="text-sm text-blue-800 space-y-1 list-disc list-inside">
+            <li>
+              <strong>YOUR_API_KEY</strong>: 発行したAPIキー（上記の「新しいAPIキーを作成」ボタンから生成）
+            </li>
+            <li>
+              <strong>YOUR_OCR_SETTING_ID</strong>: 使用するOCR設定のID（ダッシュボードの「OCR設定」ページで確認可能）
+            </li>
+            <li>
+              <strong>file</strong>: Base64エンコードされたPDFまたは画像ファイル
+            </li>
+            <li>
+              <strong>filename</strong>: ファイル名（オプション。拡張子から自動的にMIMEタイプを判定します）
+            </li>
+          </ul>
         </div>
       </div>
 
