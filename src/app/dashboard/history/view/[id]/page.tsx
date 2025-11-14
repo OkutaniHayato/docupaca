@@ -2,10 +2,11 @@
 
 import React, { useState, useEffect } from 'react';
 import { useParams } from 'next/navigation';
-import Image from 'next/image'; //
+import Image from 'next/image';
+import PdfPreview from '@/components/PdfPreview';
 import { useAuth } from '@/context/AuthContext';
-import { db, storage } from '@/config/firebase'; 
-import { doc, getDoc } from 'firebase/firestore'; 
+import { db, storage } from '@/config/firebase';
+import { doc, getDoc } from 'firebase/firestore';
 import { ref, getDownloadURL } from 'firebase/storage'; 
 
 // 
@@ -88,11 +89,17 @@ export default function HistoryDetailPage() {
         }
 
         // 5. データをセット（extracted_data がない場合は空オブジェクト）
+        const extractedData = data.extracted_data || {};
+
+        // デバッグ用：extracted_dataの構造をコンソールに出力
+        console.log('extracted_data:', extractedData);
+        console.log('extracted_data keys:', Object.keys(extractedData));
+
         setHistory({
           id: historySnap.id,
           status: data.status,
           original_file_path: data.original_file_path,
-          extracted_data: data.extracted_data || {},
+          extracted_data: extractedData,
           imageUrl: downloadUrl,
         });
 
@@ -107,15 +114,24 @@ export default function HistoryDetailPage() {
     fetchHistoryDetail();
   }, [historyId, currentUser]);
 
+  // ファイルタイプを判定する関数
+  const getFileType = (filePath: string): 'pdf' | 'image' => {
+    const lowerPath = filePath.toLowerCase();
+    if (lowerPath.endsWith('.pdf')) {
+      return 'pdf';
+    }
+    return 'image';
+  };
+
   const handleCsvDownload = (includeHeader: boolean) => {
     if (!history?.extracted_data) return;
 
     const data = history.extracted_data;
     const fields = Object.keys(data);
-    const values = fields.map(field => `"${data[field].value}"`); 
+    const values = fields.map(field => `"${data[field].value}"`);
 
     let csvContent = "data:text/csv;charset=utf-8,";
-    
+
     if (includeHeader) {
       csvContent += fields.join(",") + "\n";
     }
@@ -183,63 +199,80 @@ export default function HistoryDetailPage() {
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
 
-        {/* --- 1. 元画像とハイライト表示 --- */}
+        {/* --- 1. 元画像/PDFとハイライト表示 --- */}
         <div className="relative border border-gray-300 rounded-lg overflow-hidden">
           {history.imageUrl ? (
             <>
-              <div className="relative">
-                <Image
-                  src={history.imageUrl}
-                  alt="Original Document"
-                  className="w-full h-auto"
-                  width={800}
-                  height={1100}
-                  priority
-                  onLoad={(e) => {
-                    const img = e.target as HTMLImageElement;
-                    setImageDimensions({
-                      width: img.naturalWidth,
-                      height: img.naturalHeight,
-                    });
-                  }}
-                />
+              {getFileType(history.original_file_path) === 'pdf' ? (
+                // PDFの場合はPdfPreviewコンポーネントを使用
+                <div className="relative w-full min-h-[600px]">
+                  <PdfPreview fileUrl={history.imageUrl} />
+                  <div className="mt-4 p-3 bg-blue-50 border border-blue-200 rounded text-sm text-blue-800">
+                    PDFファイルのハイライト表示は現在サポートされていません。抽出結果は右側の表に表示されます。
+                  </div>
+                </div>
+              ) : (
+                // 画像の場合はImageコンポーネントとハイライトを使用
+                <div className="relative">
+                  <Image
+                    src={history.imageUrl}
+                    alt="Original Document"
+                    className="w-full h-auto"
+                    width={800}
+                    height={1100}
+                    priority
+                    onLoad={(e) => {
+                      const img = e.target as HTMLImageElement;
+                      setImageDimensions({
+                        width: img.naturalWidth,
+                        height: img.naturalHeight,
+                      });
+                    }}
+                  />
 
-                {/* --- ハイライトボックス（BBox） --- */}
-                {imageDimensions && Object.keys(history.extracted_data).map(key => {
-                  const field = history.extracted_data[key];
-                  const [x1, y1, x2, y2] = field.bbox;
+                  {/* --- ハイライトボックス（BBox） --- */}
+                  {imageDimensions && Object.keys(history.extracted_data).map(key => {
+                    const field = history.extracted_data[key];
 
-                  // bbox座標が有効かチェック（すべてが0の場合はスキップ）
-                  if (x1 === 0 && y1 === 0 && x2 === 0 && y2 === 0) {
-                    return null;
-                  }
+                    // fieldがオブジェクトで、bboxプロパティがあることを確認
+                    if (!field || typeof field !== 'object' || !field.bbox) {
+                      return null;
+                    }
 
-                  // bbox座標を正規化（0-1の範囲と仮定）
-                  // Gemini APIは通常、正規化された座標を返すため
-                  const left = (x1 * 100).toFixed(2);
-                  const top = (y1 * 100).toFixed(2);
-                  const width = ((x2 - x1) * 100).toFixed(2);
-                  const height = ((y2 - y1) * 100).toFixed(2);
+                    const [x1, y1, x2, y2] = field.bbox;
 
-                  return (
-                    <div
-                      key={key}
-                      title={`${key}: ${field.value}`}
-                      className="absolute border-2 border-green-600 bg-green-600 bg-opacity-10 opacity-70 hover:opacity-100 transition-opacity"
-                      style={{
-                        left: `${left}%`,
-                        top: `${top}%`,
-                        width: `${width}%`,
-                        height: `${height}%`,
-                      }}
-                    >
-                      <span className="absolute -top-5 left-0 text-xs bg-green-600 text-white px-1 rounded">
-                        {key}
-                      </span>
-                    </div>
-                  );
-                })}
-              </div>
+                    // bbox座標が有効かチェック（すべてが0の場合はスキップ）
+                    if (x1 === 0 && y1 === 0 && x2 === 0 && y2 === 0) {
+                      return null;
+                    }
+
+                    // bbox座標を正規化（0-1の範囲と仮定）
+                    // Gemini APIは通常、正規化された座標を返すため
+                    const left = (x1 * 100).toFixed(2);
+                    const top = (y1 * 100).toFixed(2);
+                    const width = ((x2 - x1) * 100).toFixed(2);
+                    const height = ((y2 - y1) * 100).toFixed(2);
+
+                    return (
+                      <div
+                        key={key}
+                        title={`${key}: ${field.value}`}
+                        className="absolute border-2 border-green-600 bg-green-600 bg-opacity-10 opacity-70 hover:opacity-100 transition-opacity"
+                        style={{
+                          left: `${left}%`,
+                          top: `${top}%`,
+                          width: `${width}%`,
+                          height: `${height}%`,
+                        }}
+                      >
+                        <span className="absolute -top-5 left-0 text-xs bg-green-600 text-white px-1 rounded">
+                          {key}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
             </>
           ) : (
             <div className="flex items-center justify-center bg-gray-100 p-12 min-h-[300px]">
@@ -290,14 +323,23 @@ export default function HistoryDetailPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {Object.keys(history.extracted_data).map(key => (
-                    <tr key={key} className="border-b hover:bg-gray-50">
-                      <td className="p-3 text-sm font-medium text-gray-800">{key}</td>
-                      <td className="p-3 text-sm text-gray-600 font-mono">
-                        {history.extracted_data[key].value}
-                      </td>
-                    </tr>
-                  ))}
+                  {Object.keys(history.extracted_data).map(key => {
+                    const field = history.extracted_data[key];
+
+                    // fieldがオブジェクトで、valueプロパティがあることを確認
+                    const displayValue = field && typeof field === 'object' && 'value' in field
+                      ? field.value
+                      : String(field);
+
+                    return (
+                      <tr key={key} className="border-b hover:bg-gray-50">
+                        <td className="p-3 text-sm font-medium text-gray-800">{key}</td>
+                        <td className="p-3 text-sm text-gray-600 font-mono">
+                          {displayValue}
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             )}
