@@ -287,10 +287,10 @@ export default function HistoryPage() {
 
       {/* 新規実行モーダル */}
       {isExecuteModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-30">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-10">
           <div className="bg-white rounded-lg shadow-xl max-w-md w-full mx-4">
             <div className="flex items-center justify-between p-6 border-b">
-              <h3 className="text-xl font-bold text-gray-900">帳票を実行</h3>
+              <h3 className="text-xl font-bold text-black">帳票を実行</h3>
               <button
                 onClick={() => {
                   setIsExecuteModalOpen(false);
@@ -310,15 +310,15 @@ export default function HistoryPage() {
                 <div className="flex items-center gap-3 p-4 bg-blue-50 rounded-lg border border-blue-200">
                   <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600"></div>
                   <div className="flex-1">
-                    <p className="text-sm font-medium text-blue-900">処理中...</p>
-                    <p className="text-xs text-blue-700 mt-1">ファイルをアップロード中です。しばらくお待ちください。</p>
+                    <p className="text-sm font-semibold text-black">処理中...</p>
+                    <p className="text-xs text-gray-800 mt-1">ファイルをアップロード中です。しばらくお待ちください。</p>
                   </div>
                 </div>
               )}
 
               {/* OCR設定選択 */}
               <div>
-                <label className="block text-sm font-medium text-gray-900 mb-2">
+                <label className="block text-sm font-semibold text-black mb-2">
                   OCR設定
                 </label>
                 <select
@@ -338,7 +338,7 @@ export default function HistoryPage() {
 
               {/* ファイルアップロード */}
               <div>
-                <label className="block text-sm font-medium text-gray-900 mb-2">
+                <label className="block text-sm font-semibold text-black mb-2">
                   帳票ファイル (PDF/画像)
                 </label>
                 <input
@@ -349,8 +349,8 @@ export default function HistoryPage() {
                   disabled={isExecuting}
                 />
                 {selectedFile && (
-                  <p className="mt-2 text-sm text-gray-800">
-                    選択中: <span className="font-medium">{selectedFile.name}</span>
+                  <p className="mt-2 text-sm text-black">
+                    選択中: <span className="font-bold">{selectedFile.name}</span>
                   </p>
                 )}
               </div>
