@@ -81,7 +81,7 @@ export default function HistoryDetailPage() {
         try {
           const imageRef = ref(storage, data.original_file_path);
           downloadUrl = await getDownloadURL(imageRef);
-        } catch (storageError: any) {
+        } catch (storageError) {
           console.warn("画像ファイルが見つかりません:", storageError);
           // ファイルが存在しない場合でも処理を続行
         }
