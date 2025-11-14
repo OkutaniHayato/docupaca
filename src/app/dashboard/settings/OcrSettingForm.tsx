@@ -38,11 +38,12 @@ export interface OcrSettingFormData {
   model_name: string;
   prompt_text: string;
   extraction_fields: ExtractionField[];
+  sample_file_path?: string; // Firebase Storageのファイルパス
 }
 
 interface OcrSettingFormProps {
   initialData?: OcrSettingFormData;
-  onSave: (data: OcrSettingFormData) => Promise<void>;
+  onSave: (data: OcrSettingFormData, file: File | null) => Promise<void>;
   isLoading: boolean;
   saveButtonText?: string;
 }
@@ -154,6 +155,25 @@ export default function OcrSettingForm({
   useEffect(() => {
     if (initialData) {
       setFormData(initialData);
+
+      // サンプルファイルがある場合はStorageから読み込んでプレビュー表示
+      if (initialData.sample_file_path) {
+        const loadSampleFile = async () => {
+          try {
+            const { storage } = await import('@/config/firebase');
+            const { ref, getDownloadURL } = await import('firebase/storage');
+
+            const fileRef = ref(storage, initialData.sample_file_path);
+            const downloadUrl = await getDownloadURL(fileRef);
+            setImagePreviewUrl(downloadUrl);
+            console.log('既存のサンプルファイルを読み込みました:', downloadUrl);
+          } catch (error) {
+            console.error('サンプルファイルの読み込みに失敗しました:', error);
+          }
+        };
+
+        loadSampleFile();
+      }
     }
   }, [initialData]);
 
@@ -276,7 +296,7 @@ export default function OcrSettingForm({
 
   const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
-    onSave(formData); 
+    onSave(formData, uploadedFile);
   };
   
   const handleEditClick = (field: ExtractionField) => {
