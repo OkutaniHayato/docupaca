@@ -3,8 +3,9 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
-import { db } from '@/config/firebase';
+import { db, storage } from '@/config/firebase';
 import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
+import { ref, uploadBytes } from 'firebase/storage';
 
 // 
 import OcrSettingForm, { OcrSettingFormData } from '../OcrSettingForm'; 
@@ -20,9 +21,9 @@ export default function NewOcrSettingPage() {
   const { currentUser } = useAuth();
 
   /**
-   * (onSave 
+   * フォームの保存処理（ファイルアップロード含む）
    */
-  const handleSave = async (data: OcrSettingFormData) => {
+  const handleSave = async (data: OcrSettingFormData, file: File | null) => {
     setError(null);
     if (!currentUser) {
       setError("認証情報が見つかりません。再度ログインしてください。");
@@ -32,20 +33,36 @@ export default function NewOcrSettingPage() {
     setIsLoading(true);
 
     try {
-      // 
+      let sampleFilePath: string | undefined = undefined;
+
+      // ファイルがアップロードされている場合は、Firebase Storageに保存
+      if (file) {
+        const fileExtension = file.name.split('.').pop();
+        const fileName = `${currentUser.uid}_${Date.now()}.${fileExtension}`;
+        const filePath = `ocr_settings/${currentUser.uid}/${fileName}`;
+        const storageRef = ref(storage, filePath);
+
+        console.log('ファイルをStorageにアップロード中:', filePath);
+        await uploadBytes(storageRef, file);
+        console.log('ファイルのアップロードが完了しました');
+
+        sampleFilePath = filePath;
+      }
+
+      // Firestoreに保存
       const settingData = {
         name: data.name,
         owner_id: currentUser.uid,
         prompt_text: data.prompt_text,
         extraction_fields: data.extraction_fields,
         model_name: data.model_name,
+        sample_file_path: sampleFilePath,
         created_at: serverTimestamp(),
       };
 
-      // Firestore 'ocr_settings' 
       await addDoc(collection(db, "ocr_settings"), settingData);
 
-      // 
+      // 設定一覧ページに戻る
       router.push('/dashboard/settings');
 
     } catch (err: unknown) {

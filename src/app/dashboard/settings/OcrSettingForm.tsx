@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
 import dynamic from 'next/dynamic';
@@ -38,11 +38,12 @@ export interface OcrSettingFormData {
   model_name: string;
   prompt_text: string;
   extraction_fields: ExtractionField[];
+  sample_file_path?: string; // Firebase Storageのファイルパス
 }
 
 interface OcrSettingFormProps {
   initialData?: OcrSettingFormData;
-  onSave: (data: OcrSettingFormData) => Promise<void>;
+  onSave: (data: OcrSettingFormData, file: File | null) => Promise<void>;
   isLoading: boolean;
   saveButtonText?: string;
 }
@@ -51,6 +52,7 @@ interface PreviewContentProps {
   handleFileChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
   imagePreviewUrl: string | null;
   uploadedFile: File | null;
+  sampleFilePath: string | undefined;
   onPdfLoadSuccess: ({ numPages }: { numPages: number }) => void;
   onAnalyze: () => void;
   isAnalyzing: boolean;
@@ -61,10 +63,16 @@ const PreviewContent = ({
   handleFileChange,
   imagePreviewUrl,
   uploadedFile,
+  sampleFilePath,
   onPdfLoadSuccess,
   onAnalyze,
   isAnalyzing,
-}: PreviewContentProps) => (
+}: PreviewContentProps) => {
+  // ファイルタイプを判定（新規アップロードまたは既存ファイル）
+  const isPdf = uploadedFile?.type === "application/pdf" ||
+                (sampleFilePath && sampleFilePath.toLowerCase().endsWith('.pdf'));
+
+  return (
     <div className="p-6 bg-white border border-gray-200 rounded-lg shadow-sm h-full">
       {/* ヘッダー：タイトルとAIボタン */}
       <div className="flex items-center justify-between mb-4">
@@ -92,6 +100,7 @@ const PreviewContent = ({
           type="file"
           accept="image/*,application/pdf"
           onChange={handleFileChange}
+          disabled={isAnalyzing}
           className="mt-1 block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-green-100 file:text-green-800 hover:file:bg-green-200 disabled:opacity-50"
         />
       </div>
@@ -103,7 +112,7 @@ const PreviewContent = ({
             <ImageIcon className="mx-auto h-12 w-12 text-gray-400" />
             <p>プレビューする画像またはPDFをアップロードしてください。</p>
           </div>
-        ) : (uploadedFile?.type === "application/pdf") ? (
+        ) : isPdf ? (
           <PdfPreview
             fileUrl={imagePreviewUrl}
             onLoadSuccess={onPdfLoadSuccess}
@@ -128,7 +137,8 @@ const PreviewContent = ({
         </p>
       )}
     </div>
-);
+  );
+};
 
 /**
  * OCR設定の「新規作成」と「編集」で共通のフォームコンポーネント
@@ -148,6 +158,32 @@ export default function OcrSettingForm({
       extraction_fields: [],
     }
   );
+
+  // initialDataが変更されたときにformDataを更新
+  useEffect(() => {
+    if (initialData) {
+      setFormData(initialData);
+
+      // サンプルファイルがある場合はStorageから読み込んでプレビュー表示
+      if (initialData.sample_file_path) {
+        const loadSampleFile = async () => {
+          try {
+            const { storage } = await import('@/config/firebase');
+            const { ref, getDownloadURL } = await import('firebase/storage');
+
+            const fileRef = ref(storage, initialData.sample_file_path);
+            const downloadUrl = await getDownloadURL(fileRef);
+            setImagePreviewUrl(downloadUrl);
+            console.log('既存のサンプルファイルを読み込みました:', downloadUrl);
+          } catch (error) {
+            console.error('サンプルファイルの読み込みに失敗しました:', error);
+          }
+        };
+
+        loadSampleFile();
+      }
+    }
+  }, [initialData]);
 
   const [newFieldName, setNewFieldName] = useState('');
   const [newFieldInstruction, setNewFieldInstruction] = useState('');
@@ -170,19 +206,22 @@ export default function OcrSettingForm({
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
+    console.log('ファイルが選択されました:', file);
     if (file) {
-      setUploadedFile(file); 
+      setUploadedFile(file);
 
       if (imagePreviewUrl) {
         URL.revokeObjectURL(imagePreviewUrl);
       }
-      
+
       const newPreviewUrl = URL.createObjectURL(file);
       setImagePreviewUrl(newPreviewUrl);
+      console.log('プレビューURLを設定しました:', newPreviewUrl);
 
     } else {
       setUploadedFile(null);
       setImagePreviewUrl(null);
+      console.log('ファイルがクリアされました');
     }
   };
 
@@ -265,7 +304,7 @@ export default function OcrSettingForm({
 
   const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
-    onSave(formData); 
+    onSave(formData, uploadedFile);
   };
   
   const handleEditClick = (field: ExtractionField) => {
@@ -532,6 +571,7 @@ export default function OcrSettingForm({
             handleFileChange={handleFileChange}
             imagePreviewUrl={imagePreviewUrl}
             uploadedFile={uploadedFile}
+            sampleFilePath={formData.sample_file_path}
             onPdfLoadSuccess={onPdfLoadSuccess}
             onAnalyze={handleAiGenerate}
             isAnalyzing={isAnalyzing}
