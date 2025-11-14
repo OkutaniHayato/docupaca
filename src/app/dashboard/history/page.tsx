@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
 import { db, storage } from '@/config/firebase';
 import {
@@ -45,6 +46,7 @@ interface ApiKey {
  * OCR実行履歴一覧ページ
  */
 export default function HistoryPage() {
+  const router = useRouter();
   const [historyList, setHistoryList] = useState<OcrHistoryItem[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const { currentUser } = useAuth();
@@ -216,16 +218,14 @@ export default function HistoryPage() {
           setHistoryList(histories);
         }
 
-        // 成功したら、モーダルを閉じて一覧に戻る
+        // 成功したら、モーダルを閉じて詳細ページに遷移
         setIsExecuteModalOpen(false);
         setSelectedFile(null);
         setSelectedSettingId('');
         setIsExecuting(false);
 
-        // 少し待ってから詳細ページにリダイレクト
-        setTimeout(() => {
-          window.location.href = `/dashboard/history/view/${data.history_id}`;
-        }, 500);
+        // 詳細ページにスムーズに遷移
+        router.push(`/dashboard/history/view/${data.history_id}`);
       }
     } catch (error) {
       console.error('Execute error:', error);
@@ -325,6 +325,7 @@ export default function HistoryPage() {
                   value={selectedSettingId}
                   onChange={(e) => setSelectedSettingId(e.target.value)}
                   className="w-full rounded-lg border border-gray-300 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-green-500"
+                  style={{ color: '#000000' }}
                   disabled={isExecuting}
                 >
                   <option value="">設定を選択してください</option>
