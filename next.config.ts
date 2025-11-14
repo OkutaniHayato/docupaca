@@ -14,22 +14,8 @@ const nextConfig: NextConfig = {
   experimental: {
     serverComponentsExternalPackages: [
       '@google/generative-ai',
-      'pdf-lib',
+      'sharp',
     ],
-  },
-  // pdfjs-dist用のWebpack設定
-  webpack: (config: any) => {
-    // canvasモジュールをクライアントサイドで無効化
-    config.resolve.alias.canvas = false;
-    // pdfjs-distのWorkerを正しく扱う
-    config.module = config.module || {};
-    config.module.rules = config.module.rules || [];
-    config.module.rules.push({
-      test: /\.mjs$/,
-      include: /node_modules/,
-      type: 'javascript/auto',
-    });
-    return config;
   },
 };
 

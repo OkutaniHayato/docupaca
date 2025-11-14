@@ -3,6 +3,9 @@ import * as admin from 'firebase-admin';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { defineSecret } from 'firebase-functions/params';
 import * as crypto from 'crypto';
+import * as pdfjsLib from 'pdfjs-dist/legacy/build/pdf';
+import { createCanvas } from 'canvas';
+import sharp from 'sharp';
 
 // Firebase Admin初期化
 admin.initializeApp();
@@ -13,6 +16,54 @@ const geminiApiKey = defineSecret('GEMINI_API_KEY');
 // Firestore, Storageインスタンス
 const db = admin.firestore();
 const storage = admin.storage();
+
+/**
+ * PDFファイルを画像（PNG）に変換する関数
+ * @param pdfBuffer PDFファイルのBuffer
+ * @returns PNG画像のBuffer
+ */
+async function convertPdfToImage(pdfBuffer: Buffer): Promise<Buffer> {
+  try {
+    // PDFドキュメントをロード
+    const loadingTask = pdfjsLib.getDocument({
+      data: new Uint8Array(pdfBuffer),
+      useSystemFonts: true,
+    });
+
+    const pdfDocument = await loadingTask.promise;
+
+    // 最初のページを取得
+    const page = await pdfDocument.getPage(1);
+
+    // ビューポートを設定（スケール2で高解像度）
+    const viewport = page.getViewport({ scale: 2.0 });
+
+    // Canvasを作成
+    const canvas = createCanvas(viewport.width, viewport.height);
+    const context = canvas.getContext('2d');
+
+    // ページをCanvasにレンダリング
+    const renderContext = {
+      canvasContext: context as any,
+      viewport: viewport,
+    };
+
+    await page.render(renderContext).promise;
+
+    // CanvasをPNGバッファに変換
+    const pngBuffer = canvas.toBuffer('image/png');
+
+    // sharpで最適化（ファイルサイズを削減）
+    const optimizedBuffer = await sharp(pngBuffer)
+      .png({ quality: 90, compressionLevel: 9 })
+      .toBuffer();
+
+    return optimizedBuffer;
+  } catch (error) {
+    functions.logger.error('PDF to image conversion error:', error);
+    throw new Error(`PDFの画像変換に失敗しました: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
 
 // APIキーのハッシュを検証する関数
 async function verifyApiKey(apiKey: string): Promise<string | null> {
@@ -156,6 +207,33 @@ export const executeOcr = functions.https.onCall(
 
       functions.logger.info(`ファイル取得成功: size=${fileBuffer.length} bytes, mimeType=${mimeType}`);
 
+      // PDFの場合は画像に変換してCloud Storageに保存
+      let convertedImagePath: string | undefined;
+      if (mimeType === 'application/pdf' || file_path.toLowerCase().endsWith('.pdf')) {
+        functions.logger.info('PDFを画像に変換中...');
+
+        try {
+          // PDFを画像に変換
+          const imageBuffer = await convertPdfToImage(fileBuffer);
+
+          // 変換した画像をCloud Storageに保存
+          const imagePath = file_path.replace(/\.pdf$/i, '_converted.png');
+          const imageFile = bucket.file(imagePath);
+
+          await imageFile.save(imageBuffer, {
+            metadata: {
+              contentType: 'image/png',
+            },
+          });
+
+          convertedImagePath = imagePath;
+          functions.logger.info(`画像変換成功: ${imagePath}`);
+        } catch (conversionError) {
+          functions.logger.warn('PDF to image conversion failed:', conversionError);
+          // 変換に失敗してもOCR処理は続行
+        }
+      }
+
       // 4. Gemini APIで処理
       const apiKey = geminiApiKey.value();
       if (!apiKey) {
@@ -216,10 +294,17 @@ ${extractionFieldsDescription}
       }
 
       // 6. ocr_historyを更新（成功）
-      await historyRef.update({
+      const updateData: any = {
         status: 'completed',
         extracted_data: extractedData,
-      });
+      };
+
+      // 変換された画像のパスがあれば追加
+      if (convertedImagePath) {
+        updateData.converted_image_path = convertedImagePath;
+      }
+
+      await historyRef.update(updateData);
 
       functions.logger.info(`OCR処理完了: history_id=${historyRef.id}`);
 
@@ -382,6 +467,51 @@ export const ocrApi = functions.https.onRequest(
 
       functions.logger.info(`File decoded: size=${fileBuffer.length} bytes, mimeType=${mimeType}`);
 
+      // Cloud Storageにファイルを保存
+      const bucket = storage.bucket();
+      const storagePath = `api_uploads/${userId}/${Date.now()}_${filename || 'upload'}`;
+      const storageFile = bucket.file(storagePath);
+
+      await storageFile.save(fileBuffer, {
+        metadata: {
+          contentType: mimeType,
+        },
+      });
+
+      functions.logger.info(`File saved to storage: ${storagePath}`);
+
+      // PDFの場合は画像に変換してCloud Storageに保存
+      let convertedImagePath: string | undefined;
+      if (mimeType === 'application/pdf' || storagePath.toLowerCase().endsWith('.pdf')) {
+        functions.logger.info('Converting PDF to image...');
+
+        try {
+          // PDFを画像に変換
+          const imageBuffer = await convertPdfToImage(fileBuffer);
+
+          // 変換した画像をCloud Storageに保存
+          const imagePath = storagePath.replace(/\.pdf$/i, '_converted.png');
+          const imageFile = bucket.file(imagePath);
+
+          await imageFile.save(imageBuffer, {
+            metadata: {
+              contentType: 'image/png',
+            },
+          });
+
+          convertedImagePath = imagePath;
+          functions.logger.info(`PDF converted to image: ${imagePath}`);
+        } catch (conversionError) {
+          functions.logger.warn('PDF to image conversion failed:', conversionError);
+          // 変換に失敗してもOCR処理は続行
+        }
+      }
+
+      // historyのoriginal_file_pathを更新
+      await historyRef.update({
+        original_file_path: storagePath,
+      });
+
       // 6. Gemini APIで処理
       const apiKeyValue = geminiApiKey.value();
       if (!apiKeyValue) {
@@ -449,10 +579,17 @@ ${extractionFieldsDescription}
       }
 
       // 8. ocr_historyを更新（成功）
-      await historyRef.update({
+      const updateData: any = {
         status: 'completed',
         extracted_data: extractedData,
-      });
+      };
+
+      // 変換された画像のパスがあれば追加
+      if (convertedImagePath) {
+        updateData.converted_image_path = convertedImagePath;
+      }
+
+      await historyRef.update(updateData);
 
       functions.logger.info(`OCR processing completed: history_id=${historyRef.id}`);
 

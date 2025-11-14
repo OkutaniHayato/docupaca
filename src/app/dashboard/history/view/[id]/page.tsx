@@ -3,7 +3,6 @@
 import React, { useState, useEffect } from 'react';
 import { useParams } from 'next/navigation';
 import Image from 'next/image';
-import PdfToImagePreview from '@/components/PdfToImagePreview';
 import { useAuth } from '@/context/AuthContext';
 import { db, storage } from '@/config/firebase';
 import { doc, getDoc } from 'firebase/firestore';
@@ -23,8 +22,10 @@ interface HistoryDetail {
   id: string;
   status: string;
   original_file_path: string;
+  converted_image_path?: string; // PDF→画像変換後のパス
   extracted_data: ExtractedData;
   imageUrl: string | null;
+  convertedImageUrl: string | null; // 変換された画像のURL
 }
 
 /**
@@ -80,12 +81,24 @@ export default function HistoryDetailPage() {
 
         // 4. 画像URLを取得（ファイルが存在しない場合は null）
         let downloadUrl: string | null = null;
+        let convertedImageUrl: string | null = null;
+
         try {
           const imageRef = ref(storage, data.original_file_path);
           downloadUrl = await getDownloadURL(imageRef);
         } catch (storageError) {
-          console.warn("画像ファイルが見つかりません:", storageError);
+          console.warn("元ファイルが見つかりません:", storageError);
           // ファイルが存在しない場合でも処理を続行
+        }
+
+        // 変換された画像がある場合は取得
+        if (data.converted_image_path) {
+          try {
+            const convertedRef = ref(storage, data.converted_image_path);
+            convertedImageUrl = await getDownloadURL(convertedRef);
+          } catch (storageError) {
+            console.warn("変換された画像が見つかりません:", storageError);
+          }
         }
 
         // 5. データをセット（extracted_data がない場合は空オブジェクト）
@@ -117,8 +130,10 @@ export default function HistoryDetailPage() {
           id: historySnap.id,
           status: data.status,
           original_file_path: data.original_file_path,
+          converted_image_path: data.converted_image_path,
           extracted_data: extractedData,
           imageUrl: downloadUrl,
+          convertedImageUrl: convertedImageUrl,
         });
 
       } catch (err) {
@@ -219,79 +234,67 @@ export default function HistoryDetailPage() {
 
         {/* --- 1. 元画像/PDFとハイライト表示 --- */}
         <div className="relative border border-gray-300 rounded-lg overflow-hidden">
-          {history.imageUrl ? (
-            <>
-              {getFileType(history.original_file_path) === 'pdf' ? (
-                // PDFの場合はPdfToImagePreviewコンポーネントを使用（Canvas変換＋ハイライト）
-                <div className="relative w-full">
-                  <PdfToImagePreview
-                    fileUrl={history.imageUrl}
-                    extractedData={history.extracted_data}
-                  />
-                </div>
-              ) : (
-                // 画像の場合はImageコンポーネントとハイライトを使用
-                <div className="relative">
-                  <Image
-                    src={history.imageUrl}
-                    alt="Original Document"
-                    className="w-full h-auto"
-                    width={800}
-                    height={1100}
-                    priority
-                    onLoad={(e) => {
-                      const img = e.target as HTMLImageElement;
-                      setImageDimensions({
-                        width: img.naturalWidth,
-                        height: img.naturalHeight,
-                      });
+          {/* 変換された画像または元画像を表示 */}
+          {history.convertedImageUrl || history.imageUrl ? (
+            <div className="relative">
+              <Image
+                src={history.convertedImageUrl || history.imageUrl!}
+                alt="Original Document"
+                className="w-full h-auto"
+                width={800}
+                height={1100}
+                priority
+                onLoad={(e) => {
+                  const img = e.target as HTMLImageElement;
+                  setImageDimensions({
+                    width: img.naturalWidth,
+                    height: img.naturalHeight,
+                  });
+                }}
+              />
+
+              {/* --- ハイライトボックス（BBox） --- */}
+              {imageDimensions && Object.keys(history.extracted_data).map(key => {
+                const field = history.extracted_data[key];
+
+                // fieldがオブジェクトで、bboxプロパティがあることを確認
+                if (!field || typeof field !== 'object' || !field.bbox) {
+                  return null;
+                }
+
+                const [x1, y1, x2, y2] = field.bbox;
+
+                // bbox座標が有効かチェック（すべてが0の場合はスキップ）
+                if (x1 === 0 && y1 === 0 && x2 === 0 && y2 === 0) {
+                  return null;
+                }
+
+                // bbox座標を正規化（0-1の範囲と仮定）
+                // Gemini APIは通常、正規化された座標を返すため
+                const left = (x1 * 100).toFixed(2);
+                const top = (y1 * 100).toFixed(2);
+                const width = ((x2 - x1) * 100).toFixed(2);
+                const height = ((y2 - y1) * 100).toFixed(2);
+
+                return (
+                  <div
+                    key={key}
+                    title={`${key}: ${field.value}`}
+                    className="absolute border-2 border-green-600 bg-green-600 bg-opacity-10 opacity-70 hover:opacity-100 transition-opacity"
+                    style={{
+                      left: `${left}%`,
+                      top: `${top}%`,
+                      width: `${width}%`,
+                      height: `${height}%`,
                     }}
-                  />
-
-                  {/* --- ハイライトボックス（BBox） --- */}
-                  {imageDimensions && Object.keys(history.extracted_data).map(key => {
-                    const field = history.extracted_data[key];
-
-                    // fieldがオブジェクトで、bboxプロパティがあることを確認
-                    if (!field || typeof field !== 'object' || !field.bbox) {
-                      return null;
-                    }
-
-                    const [x1, y1, x2, y2] = field.bbox;
-
-                    // bbox座標が有効かチェック（すべてが0の場合はスキップ）
-                    if (x1 === 0 && y1 === 0 && x2 === 0 && y2 === 0) {
-                      return null;
-                    }
-
-                    // bbox座標を正規化（0-1の範囲と仮定）
-                    // Gemini APIは通常、正規化された座標を返すため
-                    const left = (x1 * 100).toFixed(2);
-                    const top = (y1 * 100).toFixed(2);
-                    const width = ((x2 - x1) * 100).toFixed(2);
-                    const height = ((y2 - y1) * 100).toFixed(2);
-
-                    return (
-                      <div
-                        key={key}
-                        title={`${key}: ${field.value}`}
-                        className="absolute border-2 border-green-600 bg-green-600 bg-opacity-10 opacity-70 hover:opacity-100 transition-opacity"
-                        style={{
-                          left: `${left}%`,
-                          top: `${top}%`,
-                          width: `${width}%`,
-                          height: `${height}%`,
-                        }}
-                      >
-                        <span className="absolute -top-5 left-0 text-xs bg-green-600 text-white px-1 rounded">
-                          {key}
-                        </span>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </>
+                  >
+                    <span className="absolute -top-5 left-0 text-xs bg-green-600 text-white px-1 rounded">
+                      {key}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
           ) : (
             <div className="flex items-center justify-center bg-gray-100 p-12 min-h-[300px]">
               <div className="text-center text-gray-500">
