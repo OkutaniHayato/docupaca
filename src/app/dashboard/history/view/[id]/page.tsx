@@ -23,7 +23,7 @@ interface HistoryDetail {
   status: string;
   original_file_path: string;
   extracted_data: ExtractedData;
-  imageUrl: string; 
+  imageUrl: string | null;
 }
 
 /**
@@ -76,9 +76,15 @@ export default function HistoryDetailPage() {
           return;
         }
 
-        // 4. 画像URLを取得
-        const imageRef = ref(storage, data.original_file_path);
-        const downloadUrl = await getDownloadURL(imageRef);
+        // 4. 画像URLを取得（ファイルが存在しない場合は null）
+        let downloadUrl: string | null = null;
+        try {
+          const imageRef = ref(storage, data.original_file_path);
+          downloadUrl = await getDownloadURL(imageRef);
+        } catch (storageError: any) {
+          console.warn("画像ファイルが見つかりません:", storageError);
+          // ファイルが存在しない場合でも処理を続行
+        }
 
         // 5. データをセット（extracted_data がない場合は空オブジェクト）
         setHistory({
@@ -178,38 +184,61 @@ export default function HistoryDetailPage() {
 
         {/* --- 1. 元画像とハイライト表示 (next/image に変更) --- */}
         <div className="relative border border-gray-300 rounded-lg overflow-hidden">
-          <Image 
-            src={history.imageUrl} 
-            alt="Original Document" 
-            className="w-full h-auto"
-            width={800} //
-            height={1100} //
-            priority //
-          />
-          
-          {/* --- ハイライトボックス（BBox） --- */}
-          {Object.keys(history.extracted_data).map(key => {
-            
-            // 
-            // eslint-disable-next-line @typescript-eslint/no-unused-vars
-            const field = history.extracted_data[key];
-            // TODO: bbox の座標計算ロジックを実装する
-            // const [x_min, y_min, x_max, y_max] = field.bbox;
-            
-            return (
-              <div
-                key={key}
-                title={key} 
-                className="absolute border-2 border-green-600 opacity-70 hover:opacity-100"
-                style={{
-                  left: `50%`, 
-                  top: `50%`,
-                  width: `10%`,
-                  height: `10%`,
-                }}
-              ></div>
-            );
-          })}
+          {history.imageUrl ? (
+            <>
+              <Image
+                src={history.imageUrl}
+                alt="Original Document"
+                className="w-full h-auto"
+                width={800}
+                height={1100}
+                priority
+              />
+
+              {/* --- ハイライトボックス（BBox） --- */}
+              {Object.keys(history.extracted_data).map(key => {
+
+                // eslint-disable-next-line @typescript-eslint/no-unused-vars
+                const field = history.extracted_data[key];
+                // TODO: bbox の座標計算ロジックを実装する
+                // const [x_min, y_min, x_max, y_max] = field.bbox;
+
+                return (
+                  <div
+                    key={key}
+                    title={key}
+                    className="absolute border-2 border-green-600 opacity-70 hover:opacity-100"
+                    style={{
+                      left: `50%`,
+                      top: `50%`,
+                      width: `10%`,
+                      height: `10%`,
+                    }}
+                  ></div>
+                );
+              })}
+            </>
+          ) : (
+            <div className="flex items-center justify-center bg-gray-100 p-12 min-h-[300px]">
+              <div className="text-center text-gray-500">
+                <svg
+                  className="mx-auto h-12 w-12 mb-4 text-gray-400"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"
+                  />
+                </svg>
+                <p className="font-medium">画像ファイルが見つかりません</p>
+                <p className="text-sm mt-1">ファイル: {history.original_file_path}</p>
+              </div>
+            </div>
+          )}
         </div>
 
 
