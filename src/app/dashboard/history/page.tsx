@@ -3,24 +3,42 @@
 import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { useAuth } from '@/context/AuthContext';
-import { db } from '@/config/firebase';
-import { 
-  collection, 
-  query, 
-  where, 
-  getDocs, 
-  Timestamp 
+import { db, storage } from '@/config/firebase';
+import {
+  collection,
+  query,
+  where,
+  getDocs,
+  Timestamp
 } from 'firebase/firestore';
+import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
+import { getFunctions, httpsCallable } from 'firebase/functions';
+import { Upload, X } from 'lucide-react';
 
-// 
+// OCR履歴アイテムの型定義
 interface OcrHistoryItem {
   id: string; // Firestore ドキュメントID
-  setting_id: string; //
-  status: 'processing' | 'completed' | 'failed'; //
-  original_file_path: string; //
-  executed_at: Timestamp; //
+  setting_id: string;
+  status: 'processing' | 'completed' | 'failed';
+  original_file_path: string;
+  executed_at: Timestamp;
   // TODO: setting_id から設定名 (name) を取得して表示する
-  settingName?: string; // 
+  settingName?: string;
+}
+
+// OCR設定の型定義
+interface OcrSetting {
+  id: string;
+  name: string;
+  model_name: string;
+  owner_id: string;
+}
+
+// APIキーの型定義
+interface ApiKey {
+  id: string;
+  key_prefix: string;
+  created_at: Timestamp;
 }
 
 /**
@@ -30,6 +48,14 @@ export default function HistoryPage() {
   const [historyList, setHistoryList] = useState<OcrHistoryItem[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const { currentUser } = useAuth();
+
+  // 新規実行モーダル用のステート
+  const [isExecuteModalOpen, setIsExecuteModalOpen] = useState(false);
+  const [ocrSettings, setOcrSettings] = useState<OcrSetting[]>([]);
+  const [selectedSettingId, setSelectedSettingId] = useState<string>('');
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [isExecuting, setIsExecuting] = useState(false);
+  const [executeError, setExecuteError] = useState<string>('');
 
   useEffect(() => {
     if (!currentUser) return;
@@ -83,7 +109,130 @@ export default function HistoryPage() {
     fetchHistory();
   }, [currentUser]);
 
-  // 
+  // OCR設定を取得
+  useEffect(() => {
+    if (!currentUser) return;
+
+    const fetchOcrSettings = async () => {
+      try {
+        const settingsRef = collection(db, "ocr_settings");
+        const q = query(settingsRef, where("owner_id", "==", currentUser.uid));
+        const querySnapshot = await getDocs(q);
+
+        const settings: OcrSetting[] = [];
+        querySnapshot.forEach((doc) => {
+          const data = doc.data();
+          settings.push({
+            id: doc.id,
+            name: data.name,
+            model_name: data.model_name,
+            owner_id: data.owner_id,
+          });
+        });
+
+        setOcrSettings(settings);
+      } catch (error) {
+        console.error("Error fetching OCR settings: ", error);
+      }
+    };
+
+    fetchOcrSettings();
+  }, [currentUser]);
+
+  // ファイル選択ハンドラー
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files[0]) {
+      setSelectedFile(e.target.files[0]);
+      setExecuteError('');
+    }
+  };
+
+  // 実行ハンドラー
+  const handleExecute = async () => {
+    if (!currentUser) {
+      setExecuteError('ユーザーが認証されていません');
+      return;
+    }
+
+    if (!selectedSettingId) {
+      setExecuteError('OCR設定を選択してください');
+      return;
+    }
+
+    if (!selectedFile) {
+      setExecuteError('ファイルを選択してください');
+      return;
+    }
+
+    setIsExecuting(true);
+    setExecuteError('');
+
+    try {
+      // 1. ファイルをCloud Storageにアップロード
+      const timestamp = Date.now();
+      const fileName = `${timestamp}_${selectedFile.name}`;
+      const storageRef = ref(storage, `ocr_executions/${currentUser.uid}/${fileName}`);
+
+      await uploadBytes(storageRef, selectedFile);
+      const filePath = `ocr_executions/${currentUser.uid}/${fileName}`;
+
+      // 2. executeOcr Cloud Functionを呼び出し
+      const functions = getFunctions(undefined, 'asia-northeast1');
+      const executeOcr = httpsCallable(functions, 'executeOcr');
+
+      const result = await executeOcr({
+        setting_id: selectedSettingId,
+        file_path: filePath,
+        user_id: currentUser.uid,
+      });
+
+      const data = result.data as { success: boolean; history_id: string };
+
+      if (data.success) {
+        // 成功したら、モーダルを閉じて履歴をリフレッシュ
+        setIsExecuteModalOpen(false);
+        setSelectedFile(null);
+        setSelectedSettingId('');
+
+        // 履歴を再取得
+        const historyRef = collection(db, "ocr_history");
+        const settingsRef = collection(db, "ocr_settings");
+        const settingsQuery = query(settingsRef, where("owner_id", "==", currentUser.uid));
+        const settingsSnapshot = await getDocs(settingsQuery);
+
+        const settingIds = settingsSnapshot.docs.map(doc => doc.id);
+
+        if (settingIds.length > 0) {
+          const historyQuery = query(historyRef, where("setting_id", "in", settingIds));
+          const historySnapshot = await getDocs(historyQuery);
+
+          const histories: OcrHistoryItem[] = [];
+          historySnapshot.forEach((doc) => {
+            const historyData = doc.data();
+            histories.push({
+              id: doc.id,
+              setting_id: historyData.setting_id,
+              status: historyData.status,
+              original_file_path: historyData.original_file_path,
+              executed_at: historyData.executed_at,
+            });
+          });
+
+          setHistoryList(histories);
+        }
+
+        // 詳細ページにリダイレクト
+        window.location.href = `/dashboard/history/view/${data.history_id}`;
+      }
+    } catch (error) {
+      console.error('Execute error:', error);
+      setExecuteError(error instanceof Error ? error.message : '実行中にエラーが発生しました');
+    } finally {
+      setIsExecuting(false);
+    }
+  };
+
+  // ステータスチップの表示
   const getStatusChip = (status: string) => {
     switch (status) {
       case 'completed':
@@ -100,9 +249,112 @@ export default function HistoryPage() {
 
   return (
     <div>
-      <h2 className="text-2xl font-bold text-gray-800 mb-6">
-        実行履歴
-      </h2>
+      <div className="flex items-center justify-between mb-6">
+        <h2 className="text-2xl font-bold text-gray-800">
+          実行履歴
+        </h2>
+
+        <button
+          onClick={() => setIsExecuteModalOpen(true)}
+          className="rounded-lg bg-green-800 py-2 px-4 font-semibold text-white hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2 flex items-center gap-2"
+        >
+          <Upload className="h-4 w-4" />
+          新規実行
+        </button>
+      </div>
+
+      {/* 新規実行モーダル */}
+      {isExecuteModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50">
+          <div className="bg-white rounded-lg shadow-xl max-w-md w-full mx-4">
+            <div className="flex items-center justify-between p-6 border-b">
+              <h3 className="text-xl font-bold text-gray-800">帳票を実行</h3>
+              <button
+                onClick={() => {
+                  setIsExecuteModalOpen(false);
+                  setSelectedFile(null);
+                  setSelectedSettingId('');
+                  setExecuteError('');
+                }}
+                className="text-gray-400 hover:text-gray-600"
+              >
+                <X className="h-6 w-6" />
+              </button>
+            </div>
+
+            <div className="p-6 space-y-4">
+              {/* OCR設定選択 */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  OCR設定
+                </label>
+                <select
+                  value={selectedSettingId}
+                  onChange={(e) => setSelectedSettingId(e.target.value)}
+                  className="w-full rounded-lg border border-gray-300 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-green-500"
+                  disabled={isExecuting}
+                >
+                  <option value="">設定を選択してください</option>
+                  {ocrSettings.map((setting) => (
+                    <option key={setting.id} value={setting.id}>
+                      {setting.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* ファイルアップロード */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  帳票ファイル (PDF/画像)
+                </label>
+                <input
+                  type="file"
+                  accept=".pdf,.png,.jpg,.jpeg"
+                  onChange={handleFileChange}
+                  className="w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-green-50 file:text-green-700 hover:file:bg-green-100"
+                  disabled={isExecuting}
+                />
+                {selectedFile && (
+                  <p className="mt-2 text-sm text-gray-600">
+                    選択中: {selectedFile.name}
+                  </p>
+                )}
+              </div>
+
+              {/* エラーメッセージ */}
+              {executeError && (
+                <div className="rounded-lg bg-red-50 p-3 text-sm text-red-800">
+                  {executeError}
+                </div>
+              )}
+
+              {/* 実行ボタン */}
+              <div className="flex gap-3 pt-4">
+                <button
+                  onClick={() => {
+                    setIsExecuteModalOpen(false);
+                    setSelectedFile(null);
+                    setSelectedSettingId('');
+                    setExecuteError('');
+                  }}
+                  className="flex-1 rounded-lg border border-gray-300 py-2 px-4 font-semibold text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-gray-500"
+                  disabled={isExecuting}
+                >
+                  キャンセル
+                </button>
+                <button
+                  onClick={handleExecute}
+                  className="flex-1 rounded-lg bg-green-800 py-2 px-4 font-semibold text-white hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                  disabled={isExecuting || !selectedSettingId || !selectedFile}
+                >
+                  {isExecuting ? '実行中...' : '実行'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="rounded-lg border border-gray-200 bg-white shadow-sm">
         <table className="w-full">

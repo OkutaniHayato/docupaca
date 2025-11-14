@@ -33,9 +33,10 @@ export default function HistoryDetailPage() {
   const [history, setHistory] = useState<HistoryDetail | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [imageDimensions, setImageDimensions] = useState<{ width: number; height: number } | null>(null);
   const params = useParams();
   const { currentUser } = useAuth();
-  
+
   const historyId = params.id as string;
 
   useEffect(() => {
@@ -182,41 +183,63 @@ export default function HistoryDetailPage() {
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
 
-        {/* --- 1. 元画像とハイライト表示 (next/image に変更) --- */}
+        {/* --- 1. 元画像とハイライト表示 --- */}
         <div className="relative border border-gray-300 rounded-lg overflow-hidden">
           {history.imageUrl ? (
             <>
-              <Image
-                src={history.imageUrl}
-                alt="Original Document"
-                className="w-full h-auto"
-                width={800}
-                height={1100}
-                priority
-              />
+              <div className="relative">
+                <Image
+                  src={history.imageUrl}
+                  alt="Original Document"
+                  className="w-full h-auto"
+                  width={800}
+                  height={1100}
+                  priority
+                  onLoad={(e) => {
+                    const img = e.target as HTMLImageElement;
+                    setImageDimensions({
+                      width: img.naturalWidth,
+                      height: img.naturalHeight,
+                    });
+                  }}
+                />
 
-              {/* --- ハイライトボックス（BBox） --- */}
-              {Object.keys(history.extracted_data).map(key => {
+                {/* --- ハイライトボックス（BBox） --- */}
+                {imageDimensions && Object.keys(history.extracted_data).map(key => {
+                  const field = history.extracted_data[key];
+                  const [x1, y1, x2, y2] = field.bbox;
 
-                // eslint-disable-next-line @typescript-eslint/no-unused-vars
-                const field = history.extracted_data[key];
-                // TODO: bbox の座標計算ロジックを実装する
-                // const [x_min, y_min, x_max, y_max] = field.bbox;
+                  // bbox座標が有効かチェック（すべてが0の場合はスキップ）
+                  if (x1 === 0 && y1 === 0 && x2 === 0 && y2 === 0) {
+                    return null;
+                  }
 
-                return (
-                  <div
-                    key={key}
-                    title={key}
-                    className="absolute border-2 border-green-600 opacity-70 hover:opacity-100"
-                    style={{
-                      left: `50%`,
-                      top: `50%`,
-                      width: `10%`,
-                      height: `10%`,
-                    }}
-                  ></div>
-                );
-              })}
+                  // bbox座標を正規化（0-1の範囲と仮定）
+                  // Gemini APIは通常、正規化された座標を返すため
+                  const left = (x1 * 100).toFixed(2);
+                  const top = (y1 * 100).toFixed(2);
+                  const width = ((x2 - x1) * 100).toFixed(2);
+                  const height = ((y2 - y1) * 100).toFixed(2);
+
+                  return (
+                    <div
+                      key={key}
+                      title={`${key}: ${field.value}`}
+                      className="absolute border-2 border-green-600 bg-green-600 bg-opacity-10 opacity-70 hover:opacity-100 transition-opacity"
+                      style={{
+                        left: `${left}%`,
+                        top: `${top}%`,
+                        width: `${width}%`,
+                        height: `${height}%`,
+                      }}
+                    >
+                      <span className="absolute -top-5 left-0 text-xs bg-green-600 text-white px-1 rounded">
+                        {key}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
             </>
           ) : (
             <div className="flex items-center justify-center bg-gray-100 p-12 min-h-[300px]">
