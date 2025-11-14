@@ -52,6 +52,7 @@ interface PreviewContentProps {
   handleFileChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
   imagePreviewUrl: string | null;
   uploadedFile: File | null;
+  sampleFilePath: string | undefined;
   onPdfLoadSuccess: ({ numPages }: { numPages: number }) => void;
   onAnalyze: () => void;
   isAnalyzing: boolean;
@@ -62,10 +63,16 @@ const PreviewContent = ({
   handleFileChange,
   imagePreviewUrl,
   uploadedFile,
+  sampleFilePath,
   onPdfLoadSuccess,
   onAnalyze,
   isAnalyzing,
-}: PreviewContentProps) => (
+}: PreviewContentProps) => {
+  // ファイルタイプを判定（新規アップロードまたは既存ファイル）
+  const isPdf = uploadedFile?.type === "application/pdf" ||
+                (sampleFilePath && sampleFilePath.toLowerCase().endsWith('.pdf'));
+
+  return (
     <div className="p-6 bg-white border border-gray-200 rounded-lg shadow-sm h-full">
       {/* ヘッダー：タイトルとAIボタン */}
       <div className="flex items-center justify-between mb-4">
@@ -105,7 +112,7 @@ const PreviewContent = ({
             <ImageIcon className="mx-auto h-12 w-12 text-gray-400" />
             <p>プレビューする画像またはPDFをアップロードしてください。</p>
           </div>
-        ) : (uploadedFile?.type === "application/pdf") ? (
+        ) : isPdf ? (
           <PdfPreview
             fileUrl={imagePreviewUrl}
             onLoadSuccess={onPdfLoadSuccess}
@@ -130,7 +137,8 @@ const PreviewContent = ({
         </p>
       )}
     </div>
-);
+  );
+};
 
 /**
  * OCR設定の「新規作成」と「編集」で共通のフォームコンポーネント
@@ -563,6 +571,7 @@ export default function OcrSettingForm({
             handleFileChange={handleFileChange}
             imagePreviewUrl={imagePreviewUrl}
             uploadedFile={uploadedFile}
+            sampleFilePath={formData.sample_file_path}
             onPdfLoadSuccess={onPdfLoadSuccess}
             onAnalyze={handleAiGenerate}
             isAnalyzing={isAnalyzing}
