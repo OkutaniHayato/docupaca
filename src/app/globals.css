@@ -1,5 +1,9 @@
 @import "tailwindcss";
 
+/* react-pdf styles */
+@import "react-pdf/dist/esm/Page/AnnotationLayer.css";
+@import "react-pdf/dist/esm/Page/TextLayer.css";
+
 :root {
   --background: #ffffff;
   --foreground: #171717;

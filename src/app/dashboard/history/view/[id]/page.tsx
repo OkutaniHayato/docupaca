@@ -3,7 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import { useParams } from 'next/navigation';
 import Image from 'next/image';
-import PdfPreview from '@/components/PdfPreview';
+import PdfPreviewWithHighlight from '@/components/PdfPreviewWithHighlight';
 import { useAuth } from '@/context/AuthContext';
 import { db, storage } from '@/config/firebase';
 import { doc, getDoc } from 'firebase/firestore';
@@ -89,10 +89,28 @@ export default function HistoryDetailPage() {
         }
 
         // 5. データをセット（extracted_data がない場合は空オブジェクト）
-        const extractedData = data.extracted_data || {};
+        let extractedData = data.extracted_data || {};
 
         // デバッグ用：extracted_dataの構造をコンソールに出力
-        console.log('extracted_data:', extractedData);
+        console.log('extracted_data (raw):', extractedData);
+        console.log('extracted_data type:', Array.isArray(extractedData) ? 'Array' : 'Object');
+
+        // 配列の場合はオブジェクトに変換
+        if (Array.isArray(extractedData)) {
+          console.log('Converting array to object...');
+          const convertedData: ExtractedData = {};
+          extractedData.forEach((item: any) => {
+            // 各配列要素はオブジェクト（例: {invoiceDate: {value: "...", bbox: [...]}}）
+            if (item && typeof item === 'object') {
+              Object.keys(item).forEach(key => {
+                convertedData[key] = item[key];
+              });
+            }
+          });
+          extractedData = convertedData;
+          console.log('Converted extracted_data:', extractedData);
+        }
+
         console.log('extracted_data keys:', Object.keys(extractedData));
 
         setHistory({
@@ -204,12 +222,12 @@ export default function HistoryDetailPage() {
           {history.imageUrl ? (
             <>
               {getFileType(history.original_file_path) === 'pdf' ? (
-                // PDFの場合はPdfPreviewコンポーネントを使用
-                <div className="relative w-full min-h-[600px]">
-                  <PdfPreview fileUrl={history.imageUrl} />
-                  <div className="mt-4 p-3 bg-blue-50 border border-blue-200 rounded text-sm text-blue-800">
-                    PDFファイルのハイライト表示は現在サポートされていません。抽出結果は右側の表に表示されます。
-                  </div>
+                // PDFの場合はPdfPreviewWithHighlightコンポーネントを使用
+                <div className="relative w-full">
+                  <PdfPreviewWithHighlight
+                    fileUrl={history.imageUrl}
+                    extractedData={history.extracted_data}
+                  />
                 </div>
               ) : (
                 // 画像の場合はImageコンポーネントとハイライトを使用
