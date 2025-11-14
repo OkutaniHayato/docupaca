@@ -45,27 +45,47 @@ export default function HistoryDetailPage() {
       setIsLoading(true);
       setError(null);
       try {
+        // 1. 履歴を取得
         const historyRef = doc(db, "ocr_history", historyId);
         const historySnap = await getDoc(historyRef);
 
         if (!historySnap.exists()) {
           setError("履歴が見つかりません。");
-          setIsLoading(false); 
+          setIsLoading(false);
           return;
         }
 
         const data = historySnap.data();
-        
-        // TODO: 
-        
+
+        // 2. この履歴の setting_id が、現在のユーザーが所有する設定かチェック
+        const settingRef = doc(db, "ocr_settings", data.setting_id);
+        const settingSnap = await getDoc(settingRef);
+
+        if (!settingSnap.exists()) {
+          setError("関連する設定が見つかりません。");
+          setIsLoading(false);
+          return;
+        }
+
+        const settingData = settingSnap.data();
+
+        // 3. 権限チェック: 設定の owner_id が現在のユーザーと一致するか確認
+        if (settingData.owner_id !== currentUser.uid) {
+          setError("この履歴にアクセスする権限がありません。");
+          setIsLoading(false);
+          return;
+        }
+
+        // 4. 画像URLを取得
         const imageRef = ref(storage, data.original_file_path);
         const downloadUrl = await getDownloadURL(imageRef);
 
+        // 5. データをセット（extracted_data がない場合は空オブジェクト）
         setHistory({
           id: historySnap.id,
           status: data.status,
           original_file_path: data.original_file_path,
-          extracted_data: data.extracted_data,
+          extracted_data: data.extracted_data || {},
           imageUrl: downloadUrl,
         });
 
@@ -113,28 +133,45 @@ export default function HistoryDetailPage() {
     return null; 
   }
 
+  // ステータスチップを取得
+  const getStatusChip = (status: string) => {
+    switch (status) {
+      case 'completed':
+        return <span className="rounded-full bg-green-100 px-3 py-1 text-sm font-medium text-green-800">完了</span>;
+      case 'failed':
+        return <span className="rounded-full bg-red-100 px-3 py-1 text-sm font-medium text-red-800">失敗</span>;
+      default:
+        return <span className="rounded-full bg-gray-100 px-3 py-1 text-sm font-medium text-gray-800">処理中</span>;
+    }
+  };
+
   return (
     <div>
       <div className="flex justify-between items-center mb-6">
-        <h2 className="text-2xl font-bold text-gray-800">
-          実行履歴詳細
-        </h2>
-        
-        {/* --- CSVダウンロードボタン --- */}
-        <div className="flex space-x-2">
-          <button 
-            onClick={() => handleCsvDownload(true)}
-            className="rounded-lg bg-green-800 py-2 px-4 font-semibold text-white hover:bg-green-700"
-          >
-            CSV (ヘッダーあり)
-          </button>
-          <button 
-            onClick={() => handleCsvDownload(false)}
-            className="rounded-lg bg-gray-600 py-2 px-4 font-semibold text-white hover:bg-gray-500"
-          >
-            CSV (ヘッダーなし)
-          </button>
+        <div>
+          <h2 className="text-2xl font-bold text-gray-800 mb-2">
+            実行履歴詳細
+          </h2>
+          {history && getStatusChip(history.status)}
         </div>
+
+        {/* --- CSVダウンロードボタン --- */}
+        {history && Object.keys(history.extracted_data).length > 0 && (
+          <div className="flex space-x-2">
+            <button
+              onClick={() => handleCsvDownload(true)}
+              className="rounded-lg bg-green-800 py-2 px-4 font-semibold text-white hover:bg-green-700"
+            >
+              CSV (ヘッダーあり)
+            </button>
+            <button
+              onClick={() => handleCsvDownload(false)}
+              className="rounded-lg bg-gray-600 py-2 px-4 font-semibold text-white hover:bg-gray-500"
+            >
+              CSV (ヘッダーなし)
+            </button>
+          </div>
+        )}
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -180,24 +217,38 @@ export default function HistoryDetailPage() {
         <div>
           <h3 className="text-lg font-semibold mb-4">抽出結果</h3>
           <div className="rounded-lg border border-gray-200 bg-white shadow-sm">
-            <table className="w-full">
-              <thead>
-                <tr className="border-b">
-                  <th className="p-3 text-left text-sm font-semibold text-gray-600">項目名</th>
-                  <th className="p-3 text-left text-sm font-semibold text-gray-600">抽出された値</th>
-                </tr>
-              </thead>
-              <tbody>
-                {Object.keys(history.extracted_data).map(key => (
-                  <tr key={key} className="border-b hover:bg-gray-50">
-                    <td className="p-3 text-sm font-medium text-gray-800">{key}</td>
-                    <td className="p-3 text-sm text-gray-600 font-mono">
-                      {history.extracted_data[key].value}
-                    </td>
+            {Object.keys(history.extracted_data).length === 0 ? (
+              <div className="p-6 text-center text-gray-500">
+                {history.status === 'processing' && (
+                  <p>OCR処理中です。しばらくお待ちください。</p>
+                )}
+                {history.status === 'failed' && (
+                  <p className="text-red-600">OCR処理が失敗しました。</p>
+                )}
+                {history.status === 'completed' && (
+                  <p>抽出データがありません。</p>
+                )}
+              </div>
+            ) : (
+              <table className="w-full">
+                <thead>
+                  <tr className="border-b">
+                    <th className="p-3 text-left text-sm font-semibold text-gray-600">項目名</th>
+                    <th className="p-3 text-left text-sm font-semibold text-gray-600">抽出された値</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {Object.keys(history.extracted_data).map(key => (
+                    <tr key={key} className="border-b hover:bg-gray-50">
+                      <td className="p-3 text-sm font-medium text-gray-800">{key}</td>
+                      <td className="p-3 text-sm text-gray-600 font-mono">
+                        {history.extracted_data[key].value}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
           </div>
         </div>
 
