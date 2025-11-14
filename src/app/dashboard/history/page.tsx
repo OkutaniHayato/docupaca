@@ -189,11 +189,6 @@ export default function HistoryPage() {
       const data = result.data as { success: boolean; history_id: string };
 
       if (data.success) {
-        // 成功したら、モーダルを閉じて履歴をリフレッシュ
-        setIsExecuteModalOpen(false);
-        setSelectedFile(null);
-        setSelectedSettingId('');
-
         // 履歴を再取得
         const historyRef = collection(db, "ocr_history");
         const settingsRef = collection(db, "ocr_settings");
@@ -221,8 +216,16 @@ export default function HistoryPage() {
           setHistoryList(histories);
         }
 
-        // 詳細ページにリダイレクト
-        window.location.href = `/dashboard/history/view/${data.history_id}`;
+        // 成功したら、モーダルを閉じて一覧に戻る
+        setIsExecuteModalOpen(false);
+        setSelectedFile(null);
+        setSelectedSettingId('');
+        setIsExecuting(false);
+
+        // 少し待ってから詳細ページにリダイレクト
+        setTimeout(() => {
+          window.location.href = `/dashboard/history/view/${data.history_id}`;
+        }, 500);
       }
     } catch (error) {
       console.error('Execute error:', error);
@@ -237,13 +240,32 @@ export default function HistoryPage() {
     switch (status) {
       case 'completed':
         // Success カラー
-        return <span className="rounded-full bg-green-100 px-2 py-1 text-xs font-medium text-green-800">Completed</span>;
+        return (
+          <span className="rounded-full bg-green-100 px-2 py-1 text-xs font-medium text-green-800 flex items-center gap-1">
+            <svg className="h-3 w-3" fill="currentColor" viewBox="0 0 20 20">
+              <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+            </svg>
+            Completed
+          </span>
+        );
       case 'failed':
         // Error カラー
-        return <span className="rounded-full bg-red-100 px-2 py-1 text-xs font-medium text-red-800">Failed</span>;
+        return (
+          <span className="rounded-full bg-red-100 px-2 py-1 text-xs font-medium text-red-800 flex items-center gap-1">
+            <svg className="h-3 w-3" fill="currentColor" viewBox="0 0 20 20">
+              <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
+            </svg>
+            Failed
+          </span>
+        );
       default:
-        // Secondary カラー
-        return <span className="rounded-full bg-gray-100 px-2 py-1 text-xs font-medium text-gray-800">Processing</span>;
+        // Secondary カラー - 処理中アニメーション
+        return (
+          <span className="rounded-full bg-blue-100 px-2 py-1 text-xs font-medium text-blue-800 flex items-center gap-1">
+            <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-blue-800"></div>
+            Processing
+          </span>
+        );
     }
   };
 
@@ -265,10 +287,10 @@ export default function HistoryPage() {
 
       {/* 新規実行モーダル */}
       {isExecuteModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-30">
           <div className="bg-white rounded-lg shadow-xl max-w-md w-full mx-4">
             <div className="flex items-center justify-between p-6 border-b">
-              <h3 className="text-xl font-bold text-gray-800">帳票を実行</h3>
+              <h3 className="text-xl font-bold text-gray-900">帳票を実行</h3>
               <button
                 onClick={() => {
                   setIsExecuteModalOpen(false);
@@ -283,9 +305,20 @@ export default function HistoryPage() {
             </div>
 
             <div className="p-6 space-y-4">
+              {/* 実行中の状態表示 */}
+              {isExecuting && (
+                <div className="flex items-center gap-3 p-4 bg-blue-50 rounded-lg border border-blue-200">
+                  <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600"></div>
+                  <div className="flex-1">
+                    <p className="text-sm font-medium text-blue-900">処理中...</p>
+                    <p className="text-xs text-blue-700 mt-1">ファイルをアップロード中です。しばらくお待ちください。</p>
+                  </div>
+                </div>
+              )}
+
               {/* OCR設定選択 */}
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
+                <label className="block text-sm font-medium text-gray-900 mb-2">
                   OCR設定
                 </label>
                 <select
@@ -305,7 +338,7 @@ export default function HistoryPage() {
 
               {/* ファイルアップロード */}
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
+                <label className="block text-sm font-medium text-gray-900 mb-2">
                   帳票ファイル (PDF/画像)
                 </label>
                 <input
@@ -316,8 +349,8 @@ export default function HistoryPage() {
                   disabled={isExecuting}
                 />
                 {selectedFile && (
-                  <p className="mt-2 text-sm text-gray-600">
-                    選択中: {selectedFile.name}
+                  <p className="mt-2 text-sm text-gray-800">
+                    選択中: <span className="font-medium">{selectedFile.name}</span>
                   </p>
                 )}
               </div>
