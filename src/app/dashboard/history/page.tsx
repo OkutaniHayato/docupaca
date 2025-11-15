@@ -274,7 +274,7 @@ export default function HistoryPage() {
       {/* 新規実行モーダル */}
       {isExecuteModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ backgroundColor: 'rgba(0, 0, 0, 0.1)' }}>
-          <div className="bg-white rounded-lg shadow-xl w-full max-w-screen-lg mx-4">
+          <div className="bg-white rounded-lg shadow-xl w-full max-w-screen-lg mx-4" style={{ overflow: 'visible' }}>
             <div className="flex items-center justify-between p-6 border-b">
               <h3 className="text-xl font-bold" style={{ color: '#000000' }}>帳票を実行</h3>
               <button
@@ -290,9 +290,9 @@ export default function HistoryPage() {
               </button>
             </div>
 
-            <div className="p-6 space-y-4">
+            <div className="p-6 space-y-4" style={{ overflow: 'visible' }}>
               {/* OCR設定選択 */}
-              <div>
+              <div className="relative" style={{ zIndex: 1000 }}>
                 <label className="block text-sm font-semibold mb-2" style={{ color: '#000000' }}>
                   OCR設定
                 </label>
