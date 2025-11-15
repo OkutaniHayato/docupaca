@@ -274,7 +274,7 @@ export default function HistoryPage() {
       {/* 新規実行モーダル */}
       {isExecuteModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ backgroundColor: 'rgba(0, 0, 0, 0.1)' }}>
-          <div className="bg-white rounded-lg shadow-xl w-full max-w-4xl mx-4">
+          <div className="bg-white rounded-lg shadow-xl w-full max-w-screen-lg mx-4">
             <div className="flex items-center justify-between p-6 border-b">
               <h3 className="text-xl font-bold" style={{ color: '#000000' }}>帳票を実行</h3>
               <button
