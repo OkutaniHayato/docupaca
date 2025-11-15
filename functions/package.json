@@ -24,7 +24,6 @@
   },
   "devDependencies": {
     "@types/node": "^20.0.0",
-    "@types/node-canvas": "npm:@types/canvas@^2.11.0",
     "typescript": "^5.0.0"
   },
   "private": true
