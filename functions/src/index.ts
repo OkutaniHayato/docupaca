@@ -4,14 +4,33 @@ import { GoogleGenerativeAI } from '@google/generative-ai';
 import { defineSecret } from 'firebase-functions/params';
 import * as crypto from 'crypto';
 import * as pdfjsLib from 'pdfjs-dist';
-// @ts-ignore - canvas types not available in dev environment
-import { createCanvas, Path2D as CanvasPath2D } from 'canvas';
+import { createCanvas } from '@napi-rs/canvas';
 import sharp from 'sharp';
 
 // Canvas APIのPolyfill: Path2Dをグローバルにセットアップ
-// pdfjs-distがブラウザ環境のPath2Dを期待するため
+// @napi-rs/canvasにはPath2Dがないため、pdfjs-dist用に簡易実装を提供
 if (typeof global !== 'undefined' && !global.Path2D) {
-  (global as any).Path2D = CanvasPath2D;
+  class Path2DPolyfill {
+    private commands: string[] = [];
+
+    moveTo(x: number, y: number) { this.commands.push(`M${x},${y}`); }
+    lineTo(x: number, y: number) { this.commands.push(`L${x},${y}`); }
+    bezierCurveTo(cp1x: number, cp1y: number, cp2x: number, cp2y: number, x: number, y: number) {
+      this.commands.push(`C${cp1x},${cp1y} ${cp2x},${cp2y} ${x},${y}`);
+    }
+    quadraticCurveTo(cpx: number, cpy: number, x: number, y: number) {
+      this.commands.push(`Q${cpx},${cpy} ${x},${y}`);
+    }
+    arc(x: number, y: number, radius: number, startAngle: number, endAngle: number) {
+      this.commands.push(`A${x},${y},${radius},${startAngle},${endAngle}`);
+    }
+    rect(x: number, y: number, w: number, h: number) {
+      this.commands.push(`M${x},${y}L${x+w},${y}L${x+w},${y+h}L${x},${y+h}Z`);
+    }
+    closePath() { this.commands.push('Z'); }
+  }
+
+  (global as any).Path2D = Path2DPolyfill;
 }
 
 // Firebase Admin初期化
