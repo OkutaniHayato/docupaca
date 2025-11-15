@@ -5,8 +5,14 @@ import { defineSecret } from 'firebase-functions/params';
 import * as crypto from 'crypto';
 import * as pdfjsLib from 'pdfjs-dist';
 // @ts-ignore - canvas types not available in dev environment
-import { createCanvas } from 'canvas';
+import { createCanvas, Path2D as CanvasPath2D } from 'canvas';
 import sharp from 'sharp';
+
+// Canvas APIのPolyfill: Path2Dをグローバルにセットアップ
+// pdfjs-distがブラウザ環境のPath2Dを期待するため
+if (typeof global !== 'undefined' && !global.Path2D) {
+  (global as any).Path2D = CanvasPath2D;
+}
 
 // Firebase Admin初期化
 admin.initializeApp();
