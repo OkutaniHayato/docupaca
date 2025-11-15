@@ -4,7 +4,8 @@ import { GoogleGenerativeAI } from '@google/generative-ai';
 import { defineSecret } from 'firebase-functions/params';
 import * as crypto from 'crypto';
 import * as pdfjsLib from 'pdfjs-dist';
-import { createCanvas } from '@napi-rs/canvas';
+// @ts-ignore - canvas types not available in dev environment
+import { createCanvas } from 'canvas';
 import sharp from 'sharp';
 
 // Firebase Admin初期化
