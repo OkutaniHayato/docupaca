@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
@@ -59,57 +59,62 @@ export default function HistoryPage() {
   const [isExecuting, setIsExecuting] = useState(false);
   const [executeError, setExecuteError] = useState<string>('');
 
+  // 履歴リストを取得する関数
+  const fetchHistoryList = useCallback(async () => {
+    if (!currentUser) return;
+
+    try {
+      // --- 1. ユーザーが所有する OCR設定 の ID をすべて取得 ---
+      const settingsRef = collection(db, "ocr_settings");
+      const settingsQuery = query(settingsRef, where("owner_id", "==", currentUser.uid));
+      const settingsSnapshot = await getDocs(settingsQuery);
+
+      const settingIds = settingsSnapshot.docs.map(doc => doc.id);
+
+      if (settingIds.length === 0) {
+        setHistoryList([]);
+        return;
+      }
+
+      // --- 2. 取得した ID 配列を使って、履歴 を 'in' で検索 ---
+      const historyRef = collection(db, "ocr_history");
+      const historyQuery = query(historyRef, where("setting_id", "in", settingIds));
+
+      const historySnapshot = await getDocs(historyQuery);
+
+      const histories: OcrHistoryItem[] = [];
+      historySnapshot.forEach((doc) => {
+        const data = doc.data();
+        histories.push({
+          id: doc.id,
+          setting_id: data.setting_id,
+          status: data.status,
+          original_file_path: data.original_file_path,
+          executed_at: data.executed_at,
+        });
+      });
+
+      setHistoryList(histories);
+
+    } catch (error) {
+      console.error("Error fetching history: ", error);
+    }
+  }, [currentUser]);
+
   useEffect(() => {
     if (!currentUser) return;
 
-    const fetchHistory = async () => {
+    const loadHistory = async () => {
       setIsLoading(true);
       try {
-        // --- 1. ユーザーが所有する OCR設定 の ID をすべて取得 ---
-        const settingsRef = collection(db, "ocr_settings");
-        const settingsQuery = query(settingsRef, where("owner_id", "==", currentUser.uid));
-        const settingsSnapshot = await getDocs(settingsQuery);
-        
-        const settingIds = settingsSnapshot.docs.map(doc => doc.id);
-
-        if (settingIds.length === 0) {
-          // 
-          setIsLoading(false);
-          return;
-        }
-
-        // --- 2. 取得した ID 配列を使って、履歴 を 'in' で検索 ---
-        const historyRef = collection(db, "ocr_history");
-        const historyQuery = query(historyRef, where("setting_id", "in", settingIds));
-        
-        const historySnapshot = await getDocs(historyQuery);
-
-        const histories: OcrHistoryItem[] = [];
-        historySnapshot.forEach((doc) => {
-          const data = doc.data();
-          histories.push({
-            id: doc.id,
-            setting_id: data.setting_id,
-            status: data.status,
-            original_file_path: data.original_file_path,
-            executed_at: data.executed_at,
-            // 
-          });
-        });
-        
-        // TODO: settingName を紐づける処理 (
-        
-        setHistoryList(histories);
-
-      } catch (error) {
-        console.error("Error fetching history: ", error);
+        await fetchHistoryList();
       } finally {
         setIsLoading(false);
       }
     };
 
-    fetchHistory();
-  }, [currentUser]);
+    loadHistory();
+  }, [currentUser, fetchHistoryList]);
 
   // OCR設定を取得
   useEffect(() => {
@@ -169,68 +174,49 @@ export default function HistoryPage() {
     setIsExecuting(true);
     setExecuteError('');
 
+    // モーダルを閉じる前に値をキャプチャ
+    const settingId = selectedSettingId;
+    const file = selectedFile;
+
     try {
       // 1. ファイルをCloud Storageにアップロード
       const timestamp = Date.now();
-      const fileName = `${timestamp}_${selectedFile.name}`;
+      const fileName = `${timestamp}_${file.name}`;
       const storageRef = ref(storage, `ocr_executions/${currentUser.uid}/${fileName}`);
 
-      await uploadBytes(storageRef, selectedFile);
+      await uploadBytes(storageRef, file);
       const filePath = `ocr_executions/${currentUser.uid}/${fileName}`;
 
-      // 2. executeOcr Cloud Functionを呼び出し
+      // モーダルを閉じてテーブルでローディング表示
+      setIsExecuteModalOpen(false);
+      setSelectedFile(null);
+      setSelectedSettingId('');
+      setIsExecuting(false);
+
+      // 2. executeOcr Cloud Functionを呼び出し（バックグラウンド）
       const functions = getFunctions(undefined, 'asia-northeast1');
       const executeOcr = httpsCallable(functions, 'executeOcr');
 
-      const result = await executeOcr({
-        setting_id: selectedSettingId,
+      // 非同期で実行（await しない）
+      executeOcr({
+        setting_id: settingId,
         file_path: filePath,
         user_id: currentUser.uid,
+      }).then(() => {
+        // 完了後に履歴を再取得
+        fetchHistoryList();
+      }).catch((error) => {
+        console.error('Execute error:', error);
       });
 
-      const data = result.data as { success: boolean; history_id: string };
+      // すぐに履歴を再取得して「処理中」ステータスを表示
+      setTimeout(() => {
+        fetchHistoryList();
+      }, 1000);
 
-      if (data.success) {
-        // 履歴を再取得
-        const historyRef = collection(db, "ocr_history");
-        const settingsRef = collection(db, "ocr_settings");
-        const settingsQuery = query(settingsRef, where("owner_id", "==", currentUser.uid));
-        const settingsSnapshot = await getDocs(settingsQuery);
-
-        const settingIds = settingsSnapshot.docs.map(doc => doc.id);
-
-        if (settingIds.length > 0) {
-          const historyQuery = query(historyRef, where("setting_id", "in", settingIds));
-          const historySnapshot = await getDocs(historyQuery);
-
-          const histories: OcrHistoryItem[] = [];
-          historySnapshot.forEach((doc) => {
-            const historyData = doc.data();
-            histories.push({
-              id: doc.id,
-              setting_id: historyData.setting_id,
-              status: historyData.status,
-              original_file_path: historyData.original_file_path,
-              executed_at: historyData.executed_at,
-            });
-          });
-
-          setHistoryList(histories);
-        }
-
-        // 成功したら、モーダルを閉じて詳細ページに遷移
-        setIsExecuteModalOpen(false);
-        setSelectedFile(null);
-        setSelectedSettingId('');
-        setIsExecuting(false);
-
-        // 詳細ページにスムーズに遷移
-        router.push(`/dashboard/history/view/${data.history_id}`);
-      }
     } catch (error) {
       console.error('Execute error:', error);
       setExecuteError(error instanceof Error ? error.message : '実行中にエラーが発生しました');
-    } finally {
       setIsExecuting(false);
     }
   };
@@ -288,7 +274,7 @@ export default function HistoryPage() {
       {/* 新規実行モーダル */}
       {isExecuteModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ backgroundColor: 'rgba(0, 0, 0, 0.1)' }}>
-          <div className="bg-white rounded-lg shadow-xl max-w-md w-full mx-4">
+          <div className="bg-white rounded-lg shadow-xl max-w-2xl w-full mx-4">
             <div className="flex items-center justify-between p-6 border-b">
               <h3 className="text-xl font-bold" style={{ color: '#000000' }}>帳票を実行</h3>
               <button
@@ -305,17 +291,6 @@ export default function HistoryPage() {
             </div>
 
             <div className="p-6 space-y-4">
-              {/* 実行中の状態表示 */}
-              {isExecuting && (
-                <div className="flex items-center gap-3 p-4 bg-blue-50 rounded-lg border border-blue-200">
-                  <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600"></div>
-                  <div className="flex-1">
-                    <p className="text-sm font-semibold" style={{ color: '#000000' }}>処理中...</p>
-                    <p className="text-xs mt-1" style={{ color: '#1f2937' }}>ファイルをアップロード中です。しばらくお待ちください。</p>
-                  </div>
-                </div>
-              )}
-
               {/* OCR設定選択 */}
               <div>
                 <label className="block text-sm font-semibold mb-2" style={{ color: '#000000' }}>
@@ -326,7 +301,6 @@ export default function HistoryPage() {
                   onChange={(e) => setSelectedSettingId(e.target.value)}
                   className="w-full rounded-lg border border-gray-300 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-green-500"
                   style={{ color: '#000000' }}
-                  disabled={isExecuting}
                 >
                   <option value="">設定を選択してください</option>
                   {ocrSettings.map((setting) => (
@@ -347,7 +321,6 @@ export default function HistoryPage() {
                   accept=".pdf,.png,.jpg,.jpeg"
                   onChange={handleFileChange}
                   className="w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-green-50 file:text-green-700 hover:file:bg-green-100"
-                  disabled={isExecuting}
                 />
                 {selectedFile && (
                   <p className="mt-2 text-sm" style={{ color: '#000000' }}>
@@ -373,16 +346,15 @@ export default function HistoryPage() {
                     setExecuteError('');
                   }}
                   className="flex-1 rounded-lg border border-gray-300 py-2 px-4 font-semibold text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-gray-500"
-                  disabled={isExecuting}
                 >
                   キャンセル
                 </button>
                 <button
                   onClick={handleExecute}
                   className="flex-1 rounded-lg bg-green-800 py-2 px-4 font-semibold text-white hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-500 disabled:opacity-50 disabled:cursor-not-allowed"
-                  disabled={isExecuting || !selectedSettingId || !selectedFile}
+                  disabled={!selectedSettingId || !selectedFile}
                 >
-                  {isExecuting ? '実行中...' : '実行'}
+                  実行
                 </button>
               </div>
             </div>
