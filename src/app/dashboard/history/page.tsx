@@ -2,7 +2,6 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
 import { db, storage } from '@/config/firebase';
 import {
@@ -12,7 +11,7 @@ import {
   getDocs,
   Timestamp
 } from 'firebase/firestore';
-import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
+import { ref, uploadBytes } from 'firebase/storage';
 import { getFunctions, httpsCallable } from 'firebase/functions';
 import { Upload, X } from 'lucide-react';
 
@@ -35,18 +34,10 @@ interface OcrSetting {
   owner_id: string;
 }
 
-// APIキーの型定義
-interface ApiKey {
-  id: string;
-  key_prefix: string;
-  created_at: Timestamp;
-}
-
 /**
  * OCR実行履歴一覧ページ
  */
 export default function HistoryPage() {
-  const router = useRouter();
   const [historyList, setHistoryList] = useState<OcrHistoryItem[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const { currentUser } = useAuth();
@@ -56,7 +47,6 @@ export default function HistoryPage() {
   const [ocrSettings, setOcrSettings] = useState<OcrSetting[]>([]);
   const [selectedSettingId, setSelectedSettingId] = useState<string>('');
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
-  const [isExecuting, setIsExecuting] = useState(false);
   const [executeError, setExecuteError] = useState<string>('');
 
   // 履歴リストを取得する関数
@@ -171,7 +161,6 @@ export default function HistoryPage() {
       return;
     }
 
-    setIsExecuting(true);
     setExecuteError('');
 
     // モーダルを閉じる前に値をキャプチャ
@@ -191,7 +180,6 @@ export default function HistoryPage() {
       setIsExecuteModalOpen(false);
       setSelectedFile(null);
       setSelectedSettingId('');
-      setIsExecuting(false);
 
       // 2. executeOcr Cloud Functionを呼び出し（バックグラウンド）
       const functions = getFunctions(undefined, 'asia-northeast1');
@@ -217,7 +205,6 @@ export default function HistoryPage() {
     } catch (error) {
       console.error('Execute error:', error);
       setExecuteError(error instanceof Error ? error.message : '実行中にエラーが発生しました');
-      setIsExecuting(false);
     }
   };
 

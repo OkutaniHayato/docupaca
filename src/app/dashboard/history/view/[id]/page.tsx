@@ -112,11 +112,11 @@ export default function HistoryDetailPage() {
         if (Array.isArray(extractedData)) {
           console.log('Converting array to object...');
           const convertedData: ExtractedData = {};
-          extractedData.forEach((item: any) => {
+          extractedData.forEach((item: unknown) => {
             // 各配列要素はオブジェクト（例: {invoiceDate: {value: "...", bbox: [...]}}）
             if (item && typeof item === 'object') {
               Object.keys(item).forEach(key => {
-                convertedData[key] = item[key];
+                convertedData[key] = (item as Record<string, ExtractedField>)[key];
               });
             }
           });
@@ -146,15 +146,6 @@ export default function HistoryDetailPage() {
 
     fetchHistoryDetail();
   }, [historyId, currentUser]);
-
-  // ファイルタイプを判定する関数
-  const getFileType = (filePath: string): 'pdf' | 'image' => {
-    const lowerPath = filePath.toLowerCase();
-    if (lowerPath.endsWith('.pdf')) {
-      return 'pdf';
-    }
-    return 'image';
-  };
 
   const handleCsvDownload = (includeHeader: boolean) => {
     if (!history?.extracted_data) return;

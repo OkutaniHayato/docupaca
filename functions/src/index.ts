@@ -30,7 +30,7 @@ if (typeof global !== 'undefined' && !global.Path2D) {
     closePath() { this.commands.push('Z'); }
   }
 
-  (global as any).Path2D = Path2DPolyfill;
+  (global as Record<string, unknown>).Path2D = Path2DPolyfill;
 }
 
 // Firebase Admin初期化
@@ -70,7 +70,7 @@ async function convertPdfToImage(pdfBuffer: Buffer): Promise<Buffer> {
 
     // ページをCanvasにレンダリング
     const renderContext = {
-      canvasContext: context as any,
+      canvasContext: context as unknown as CanvasRenderingContext2D,
       viewport: viewport,
     };
 
@@ -320,7 +320,7 @@ ${extractionFieldsDescription}
       }
 
       // 6. ocr_historyを更新（成功）
-      const updateData: any = {
+      const updateData: Record<string, unknown> = {
         status: 'completed',
         extracted_data: extractedData,
       };
@@ -605,7 +605,7 @@ ${extractionFieldsDescription}
       }
 
       // 8. ocr_historyを更新（成功）
-      const updateData: any = {
+      const updateData: Record<string, unknown> = {
         status: 'completed',
         extracted_data: extractedData,
       };
