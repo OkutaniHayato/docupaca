@@ -2,6 +2,7 @@ import type { NextConfig } from 'next';
 
 const nextConfig: NextConfig = {
   reactStrictMode: true,
+  output: 'standalone',
   images: {
     remotePatterns: [
       {
@@ -11,12 +12,10 @@ const nextConfig: NextConfig = {
     ],
   },
   // API Routeで外部パッケージを使用可能にする
-  experimental: {
-    serverComponentsExternalPackages: [
-      '@google/generative-ai',
-      'sharp',
-    ],
-  },
+  serverExternalPackages: [
+    '@google/generative-ai',
+    'sharp',
+  ],
 };
 
 export default nextConfig;
