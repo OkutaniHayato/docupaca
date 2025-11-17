@@ -12,9 +12,12 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
-    
+
     // 💡 修正点: PDF workerファイルをLint対象から除外
     "public/pdf.worker.min.mjs",
+
+    // Cloud Functions build output
+    "functions/lib/**",
   ]),
 ]);
 

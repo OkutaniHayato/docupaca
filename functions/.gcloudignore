@@ -1,0 +1,16 @@
+# Ignore node_modules to let Cloud Build install fresh
+node_modules/
+
+# Let Cloud Build generate package-lock.json with native bindings
+package-lock.json
+
+# Ignore TypeScript source (only deploy compiled JS)
+src/
+
+# Ignore git
+.git
+.gitignore
+
+# Ignore local config
+.env
+.env.local
