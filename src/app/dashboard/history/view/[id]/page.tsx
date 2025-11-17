@@ -1,8 +1,9 @@
 "use client";
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useParams } from 'next/navigation';
 import Image from 'next/image';
+import { TransformWrapper, TransformComponent } from 'react-zoom-pan-pinch';
 import { useAuth } from '@/context/AuthContext';
 import { db, storage } from '@/config/firebase';
 import { doc, getDoc } from 'firebase/firestore';
@@ -36,6 +37,8 @@ export default function HistoryDetailPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [imageDimensions, setImageDimensions] = useState<{ width: number; height: number } | null>(null);
+  const [displayedImageSize, setDisplayedImageSize] = useState<{ width: number; height: number } | null>(null);
+  const imageRef = useRef<HTMLImageElement>(null);
   const params = useParams();
   const { currentUser } = useAuth();
 
@@ -224,70 +227,167 @@ export default function HistoryDetailPage() {
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
 
         {/* --- 1. 元画像/PDFとハイライト表示 --- */}
-        <div className="border border-gray-300 rounded-lg overflow-auto">
+        <div className="border border-gray-300 rounded-lg overflow-hidden bg-gray-50">
           {/* 変換された画像または元画像を表示 */}
           {history.convertedImageUrl || history.imageUrl ? (
-            <div className="flex items-start justify-center" style={{ maxHeight: 'calc(100vh - 200px)' }}>
-              <div className="relative inline-block">
-                <Image
-                  src={history.convertedImageUrl || history.imageUrl!}
-                  alt="Original Document"
-                  className="w-auto h-auto object-contain"
-                  width={800}
-                  height={1100}
-                  priority
-                  style={{ maxHeight: 'calc(100vh - 200px)' }}
-                  onLoad={(e) => {
-                    const img = e.target as HTMLImageElement;
-                    setImageDimensions({
-                      width: img.naturalWidth,
-                      height: img.naturalHeight,
-                    });
-                  }}
-                />
+            <div>
+              {/* ズーム操作説明 */}
+              <div className="bg-blue-50 border-b border-blue-200 px-4 py-2 text-sm text-blue-800">
+                マウスホイールでズーム、ドラッグで移動できます
+              </div>
 
-                {/* --- ハイライトボックス（BBox） --- */}
-                {imageDimensions && Object.keys(history.extracted_data).map(key => {
-                  const field = history.extracted_data[key];
+              <TransformWrapper
+                initialScale={1}
+                minScale={0.5}
+                maxScale={4}
+                centerOnInit={true}
+              >
+                {({ zoomIn, zoomOut, resetTransform }) => (
+                  <>
+                    {/* ズームコントロールボタン */}
+                    <div className="absolute top-16 right-4 z-10 flex flex-col gap-2">
+                      <button
+                        onClick={() => zoomIn()}
+                        className="bg-white border border-gray-300 rounded-lg p-2 shadow-md hover:bg-gray-100"
+                        title="拡大"
+                      >
+                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                        </svg>
+                      </button>
+                      <button
+                        onClick={() => zoomOut()}
+                        className="bg-white border border-gray-300 rounded-lg p-2 shadow-md hover:bg-gray-100"
+                        title="縮小"
+                      >
+                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20 12H4" />
+                        </svg>
+                      </button>
+                      <button
+                        onClick={() => resetTransform()}
+                        className="bg-white border border-gray-300 rounded-lg p-2 shadow-md hover:bg-gray-100"
+                        title="リセット"
+                      >
+                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                        </svg>
+                      </button>
+                    </div>
 
-                  // fieldがオブジェクトで、bboxプロパティがあることを確認
-                  if (!field || typeof field !== 'object' || !field.bbox) {
-                    return null;
-                  }
-
-                  const [x1, y1, x2, y2] = field.bbox;
-
-                  // bbox座標が有効かチェック（すべてが0の場合はスキップ）
-                  if (x1 === 0 && y1 === 0 && x2 === 0 && y2 === 0) {
-                    return null;
-                  }
-
-                  // bbox座標を正規化（0-1の範囲と仮定）
-                  // Gemini APIは通常、正規化された座標を返すため
-                  const left = (x1 * 100).toFixed(2);
-                  const top = (y1 * 100).toFixed(2);
-                  const width = ((x2 - x1) * 100).toFixed(2);
-                  const height = ((y2 - y1) * 100).toFixed(2);
-
-                  return (
-                    <div
-                      key={key}
-                      title={`${key}: ${field.value}`}
-                      className="absolute border-2 border-green-600 bg-green-600 bg-opacity-10 opacity-70 hover:opacity-100 transition-opacity pointer-events-none"
-                      style={{
-                        left: `${left}%`,
-                        top: `${top}%`,
-                        width: `${width}%`,
-                        height: `${height}%`,
+                    <TransformComponent
+                      wrapperStyle={{
+                        width: '100%',
+                        height: 'calc(100vh - 250px)',
+                        cursor: 'grab'
+                      }}
+                      contentStyle={{
+                        width: '100%',
+                        height: '100%',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center'
                       }}
                     >
-                      <span className="absolute -top-5 left-0 text-xs bg-green-600 text-white px-1 rounded pointer-events-auto whitespace-nowrap">
-                        {key}
-                      </span>
-                    </div>
-                  );
-                })}
-              </div>
+                      <div className="relative inline-block">
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
+                          ref={imageRef}
+                          src={history.convertedImageUrl || history.imageUrl!}
+                          alt="Original Document"
+                          className="max-h-[calc(100vh-250px)] w-auto h-auto"
+                          onLoad={(e) => {
+                            const img = e.target as HTMLImageElement;
+                            console.log('Image loaded:', {
+                              naturalWidth: img.naturalWidth,
+                              naturalHeight: img.naturalHeight,
+                              displayWidth: img.width,
+                              displayHeight: img.height,
+                              clientWidth: img.clientWidth,
+                              clientHeight: img.clientHeight
+                            });
+                            setImageDimensions({
+                              width: img.naturalWidth,
+                              height: img.naturalHeight,
+                            });
+                            setDisplayedImageSize({
+                              width: img.clientWidth,
+                              height: img.clientHeight,
+                            });
+                          }}
+                        />
+
+                        {/* --- ハイライトボックス（BBox） --- */}
+                        {displayedImageSize && imageDimensions && Object.keys(history.extracted_data).map(key => {
+                          const field = history.extracted_data[key];
+
+                          // fieldがオブジェクトで、bboxプロパティがあることを確認
+                          if (!field || typeof field !== 'object' || !field.bbox) {
+                            console.log(`Skipping ${key}: no bbox`, field);
+                            return null;
+                          }
+
+                          const bbox = field.bbox;
+                          console.log(`Processing ${key}:`, { bbox, value: field.value });
+
+                          // bbox座標を取得
+                          const [x1, y1, x2, y2] = bbox;
+
+                          // bbox座標が有効かチェック（すべてが0の場合はスキップ）
+                          if (x1 === 0 && y1 === 0 && x2 === 0 && y2 === 0) {
+                            console.log(`Skipping ${key}: all zeros`);
+                            return null;
+                          }
+
+                          // bbox座標が正規化されているか確認（0-1の範囲）
+                          const isNormalized = x1 <= 1 && y1 <= 1 && x2 <= 1 && y2 <= 1;
+
+                          // 正規化された座標の場合、表示サイズに基づいてピクセル座標に変換
+                          let left, top, width, height;
+
+                          if (isNormalized) {
+                            console.log(`${key}: Using normalized coordinates`);
+                            left = x1 * displayedImageSize.width;
+                            top = y1 * displayedImageSize.height;
+                            width = (x2 - x1) * displayedImageSize.width;
+                            height = (y2 - y1) * displayedImageSize.height;
+                          } else {
+                            // ピクセル座標の場合、画像のスケールを考慮
+                            console.log(`${key}: Using pixel coordinates`);
+                            const scaleX = displayedImageSize.width / imageDimensions.width;
+                            const scaleY = displayedImageSize.height / imageDimensions.height;
+                            left = x1 * scaleX;
+                            top = y1 * scaleY;
+                            width = (x2 - x1) * scaleX;
+                            height = (y2 - y1) * scaleY;
+                          }
+
+                          console.log(`${key} position:`, { left, top, width, height });
+
+                          return (
+                            <div
+                              key={key}
+                              title={`${key}: ${field.value}`}
+                              className="absolute border-2 border-green-600 bg-green-600 bg-opacity-10 opacity-70 hover:opacity-100 transition-opacity"
+                              style={{
+                                left: `${left}px`,
+                                top: `${top}px`,
+                                width: `${width}px`,
+                                height: `${height}px`,
+                                pointerEvents: 'none'
+                              }}
+                            >
+                              <span className="absolute -top-5 left-0 text-xs bg-green-600 text-white px-1 rounded whitespace-nowrap">
+                                {key}
+                              </span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </TransformComponent>
+                  </>
+                )}
+              </TransformWrapper>
             </div>
           ) : (
             <div className="flex items-center justify-center bg-gray-100 p-12 min-h-[300px]">
