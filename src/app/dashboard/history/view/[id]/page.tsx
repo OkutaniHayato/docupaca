@@ -224,67 +224,70 @@ export default function HistoryDetailPage() {
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
 
         {/* --- 1. 元画像/PDFとハイライト表示 --- */}
-        <div className="relative border border-gray-300 rounded-lg overflow-hidden">
+        <div className="border border-gray-300 rounded-lg overflow-auto">
           {/* 変換された画像または元画像を表示 */}
           {history.convertedImageUrl || history.imageUrl ? (
-            <div className="relative">
-              <Image
-                src={history.convertedImageUrl || history.imageUrl!}
-                alt="Original Document"
-                className="w-full h-auto"
-                width={800}
-                height={1100}
-                priority
-                onLoad={(e) => {
-                  const img = e.target as HTMLImageElement;
-                  setImageDimensions({
-                    width: img.naturalWidth,
-                    height: img.naturalHeight,
-                  });
-                }}
-              />
+            <div className="flex items-start justify-center" style={{ maxHeight: 'calc(100vh - 200px)' }}>
+              <div className="relative inline-block">
+                <Image
+                  src={history.convertedImageUrl || history.imageUrl!}
+                  alt="Original Document"
+                  className="w-auto h-auto object-contain"
+                  width={800}
+                  height={1100}
+                  priority
+                  style={{ maxHeight: 'calc(100vh - 200px)' }}
+                  onLoad={(e) => {
+                    const img = e.target as HTMLImageElement;
+                    setImageDimensions({
+                      width: img.naturalWidth,
+                      height: img.naturalHeight,
+                    });
+                  }}
+                />
 
-              {/* --- ハイライトボックス（BBox） --- */}
-              {imageDimensions && Object.keys(history.extracted_data).map(key => {
-                const field = history.extracted_data[key];
+                {/* --- ハイライトボックス（BBox） --- */}
+                {imageDimensions && Object.keys(history.extracted_data).map(key => {
+                  const field = history.extracted_data[key];
 
-                // fieldがオブジェクトで、bboxプロパティがあることを確認
-                if (!field || typeof field !== 'object' || !field.bbox) {
-                  return null;
-                }
+                  // fieldがオブジェクトで、bboxプロパティがあることを確認
+                  if (!field || typeof field !== 'object' || !field.bbox) {
+                    return null;
+                  }
 
-                const [x1, y1, x2, y2] = field.bbox;
+                  const [x1, y1, x2, y2] = field.bbox;
 
-                // bbox座標が有効かチェック（すべてが0の場合はスキップ）
-                if (x1 === 0 && y1 === 0 && x2 === 0 && y2 === 0) {
-                  return null;
-                }
+                  // bbox座標が有効かチェック（すべてが0の場合はスキップ）
+                  if (x1 === 0 && y1 === 0 && x2 === 0 && y2 === 0) {
+                    return null;
+                  }
 
-                // bbox座標を正規化（0-1の範囲と仮定）
-                // Gemini APIは通常、正規化された座標を返すため
-                const left = (x1 * 100).toFixed(2);
-                const top = (y1 * 100).toFixed(2);
-                const width = ((x2 - x1) * 100).toFixed(2);
-                const height = ((y2 - y1) * 100).toFixed(2);
+                  // bbox座標を正規化（0-1の範囲と仮定）
+                  // Gemini APIは通常、正規化された座標を返すため
+                  const left = (x1 * 100).toFixed(2);
+                  const top = (y1 * 100).toFixed(2);
+                  const width = ((x2 - x1) * 100).toFixed(2);
+                  const height = ((y2 - y1) * 100).toFixed(2);
 
-                return (
-                  <div
-                    key={key}
-                    title={`${key}: ${field.value}`}
-                    className="absolute border-2 border-green-600 bg-green-600 bg-opacity-10 opacity-70 hover:opacity-100 transition-opacity"
-                    style={{
-                      left: `${left}%`,
-                      top: `${top}%`,
-                      width: `${width}%`,
-                      height: `${height}%`,
-                    }}
-                  >
-                    <span className="absolute -top-5 left-0 text-xs bg-green-600 text-white px-1 rounded">
-                      {key}
-                    </span>
-                  </div>
-                );
-              })}
+                  return (
+                    <div
+                      key={key}
+                      title={`${key}: ${field.value}`}
+                      className="absolute border-2 border-green-600 bg-green-600 bg-opacity-10 opacity-70 hover:opacity-100 transition-opacity pointer-events-none"
+                      style={{
+                        left: `${left}%`,
+                        top: `${top}%`,
+                        width: `${width}%`,
+                        height: `${height}%`,
+                      }}
+                    >
+                      <span className="absolute -top-5 left-0 text-xs bg-green-600 text-white px-1 rounded pointer-events-auto whitespace-nowrap">
+                        {key}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
             </div>
           ) : (
             <div className="flex items-center justify-center bg-gray-100 p-12 min-h-[300px]">
