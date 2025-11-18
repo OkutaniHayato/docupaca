@@ -158,9 +158,9 @@ export default function HistoryDetailPage() {
           setting_id: data.setting_id,
           setting: {
             name: settingData.name || '設定名なし',
-            fields: settingData.fields || [],
-            prompt: settingData.prompt,
-            model: settingData.model,
+            fields: settingData.extraction_fields || [],
+            prompt: settingData.prompt_text,
+            model: settingData.model_name,
           },
         };
 
