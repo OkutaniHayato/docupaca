@@ -72,18 +72,26 @@ export default function HistoryDetailPage() {
         }
 
         const data = historySnap.data();
+        console.log('History data:', data);
+        console.log('Setting ID:', data.setting_id);
 
         // 2. この履歴の setting_id が、現在のユーザーが所有する設定かチェック
+        if (!data.setting_id) {
+          console.warn('No setting_id found in history data');
+        }
+
         const settingRef = doc(db, "ocr_settings", data.setting_id);
         const settingSnap = await getDoc(settingRef);
 
         if (!settingSnap.exists()) {
+          console.error('Setting not found for ID:', data.setting_id);
           setError("関連する設定が見つかりません。");
           setIsLoading(false);
           return;
         }
 
         const settingData = settingSnap.data();
+        console.log('Setting data:', settingData);
 
         // 3. 権限チェック: 設定の owner_id が現在のユーザーと一致するか確認
         if (settingData.owner_id !== currentUser.uid) {
@@ -139,7 +147,7 @@ export default function HistoryDetailPage() {
 
         console.log('extracted_data keys:', Object.keys(extractedData));
 
-        setHistory({
+        const historyDetail: HistoryDetail = {
           id: historySnap.id,
           status: data.status,
           original_file_path: data.original_file_path,
@@ -154,7 +162,12 @@ export default function HistoryDetailPage() {
             prompt: settingData.prompt,
             model: settingData.model,
           },
-        });
+        };
+
+        console.log('Final history detail:', historyDetail);
+        console.log('Setting info:', historyDetail.setting);
+
+        setHistory(historyDetail);
 
       } catch (err) {
         console.error("Error fetching history detail: ", err);
@@ -475,6 +488,13 @@ export default function HistoryDetailPage() {
           </div>
 
           {/* --- OCR設定情報 --- */}
+          {(() => {
+            console.log('Rendering OCR settings section');
+            console.log('history:', history);
+            console.log('history.setting:', history?.setting);
+            console.log('history.setting_id:', history?.setting_id);
+            return null;
+          })()}
           {history.setting && (
             <div className="mt-6">
               <div className="rounded-lg border border-gray-200 bg-white shadow-sm p-4">
