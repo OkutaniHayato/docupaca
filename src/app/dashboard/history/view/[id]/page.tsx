@@ -24,6 +24,7 @@ interface OcrSetting {
   name: string;
   fields: Array<{ name: string; description: string }>;
   prompt?: string;
+  model?: string;
 }
 
 interface HistoryDetail {
@@ -47,7 +48,6 @@ export default function HistoryDetailPage() {
   const [error, setError] = useState<string | null>(null);
   const [imageDimensions, setImageDimensions] = useState<{ width: number; height: number } | null>(null);
   const [displayedImageSize, setDisplayedImageSize] = useState<{ width: number; height: number } | null>(null);
-  const [isSettingOpen, setIsSettingOpen] = useState(false);
   const imageRef = useRef<HTMLImageElement>(null);
   const params = useParams();
   const { currentUser } = useAuth();
@@ -152,6 +152,7 @@ export default function HistoryDetailPage() {
             name: settingData.name || '設定名なし',
             fields: settingData.fields || [],
             prompt: settingData.prompt,
+            model: settingData.model,
           },
         });
 
@@ -476,61 +477,33 @@ export default function HistoryDetailPage() {
           {/* --- OCR設定情報 --- */}
           {history.setting && (
             <div className="mt-6">
-              <button
-                onClick={() => setIsSettingOpen(!isSettingOpen)}
-                className="w-full flex items-center justify-between p-4 bg-gray-50 hover:bg-gray-100 rounded-lg border border-gray-200 transition-colors"
-              >
-                <h3 className="text-lg font-semibold text-gray-900">OCR設定</h3>
-                <svg
-                  className={`w-5 h-5 text-gray-600 transition-transform ${isSettingOpen ? 'rotate-180' : ''}`}
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                </svg>
-              </button>
-
-              {isSettingOpen && (
-                <div className="mt-2 rounded-lg border border-gray-200 bg-white shadow-sm p-4">
-                  <div className="flex justify-end mb-4">
-                    <Link
-                      href={`/dashboard/settings/edit/${history.setting_id}`}
-                      className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm font-medium inline-block"
-                    >
-                      設定を編集
-                    </Link>
-                  </div>
-
-                  <div className="mb-4">
-                    <h4 className="text-sm font-semibold text-gray-700 mb-2">設定名</h4>
-                    <p className="text-sm text-gray-900">{history.setting.name}</p>
-                  </div>
-
-                  <div className="mb-4">
-                    <h4 className="text-sm font-semibold text-gray-700 mb-2">抽出項目</h4>
-                    <div className="space-y-2">
-                      {history.setting.fields.map((field, index) => (
-                        <div key={index} className="bg-gray-50 rounded p-3">
-                          <div className="font-medium text-sm text-gray-900">{field.name}</div>
-                          {field.description && (
-                            <div className="text-sm text-gray-600 mt-1">{field.description}</div>
-                          )}
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-
-                  {history.setting.prompt && (
-                    <div>
-                      <h4 className="text-sm font-semibold text-gray-700 mb-2">プロンプト</h4>
-                      <div className="bg-gray-50 rounded p-3 text-sm text-gray-900 whitespace-pre-wrap font-mono">
-                        {history.setting.prompt}
-                      </div>
-                    </div>
-                  )}
+              <div className="rounded-lg border border-gray-200 bg-white shadow-sm p-4">
+                <div className="flex justify-between items-center mb-4">
+                  <h3 className="text-lg font-semibold text-gray-900">OCR設定</h3>
+                  <Link
+                    href={`/dashboard/settings/edit/${history.setting_id}`}
+                    className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm font-medium inline-block"
+                  >
+                    設定を編集
+                  </Link>
                 </div>
-              )}
+
+                {history.setting.model && (
+                  <div className="mb-4">
+                    <h4 className="text-sm font-semibold text-gray-700 mb-2">モデル</h4>
+                    <p className="text-sm text-gray-900">{history.setting.model}</p>
+                  </div>
+                )}
+
+                {history.setting.prompt && (
+                  <div>
+                    <h4 className="text-sm font-semibold text-gray-700 mb-2">抽出指示</h4>
+                    <div className="bg-gray-50 rounded p-3 text-sm text-gray-900 whitespace-pre-wrap font-mono">
+                      {history.setting.prompt}
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
           )}
         </div>
