@@ -147,7 +147,7 @@ export default function HistoryDetailPage() {
             // 各配列要素はオブジェクト（例: {invoiceDate: {value: "...", bbox: [...]}}）
             if (item && typeof item === 'object') {
               Object.keys(item).forEach(key => {
-                convertedData[key] = (item as Record<string, ExtractedField>)[key];
+                convertedData[key] = (item as Record<string, ExtractedValue | ExtractedArrayData>)[key];
               });
             }
           });
