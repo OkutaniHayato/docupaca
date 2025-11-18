@@ -19,6 +19,12 @@ interface ExtractedData {
   [key: string]: ExtractedField;
 }
 
+interface OcrSetting {
+  name: string;
+  fields: Array<{ name: string; description: string }>;
+  prompt?: string;
+}
+
 interface HistoryDetail {
   id: string;
   status: string;
@@ -27,6 +33,7 @@ interface HistoryDetail {
   extracted_data: ExtractedData;
   imageUrl: string | null;
   convertedImageUrl: string | null; // 変換された画像のURL
+  setting?: OcrSetting; // OCR設定情報
 }
 
 /**
@@ -38,6 +45,7 @@ export default function HistoryDetailPage() {
   const [error, setError] = useState<string | null>(null);
   const [imageDimensions, setImageDimensions] = useState<{ width: number; height: number } | null>(null);
   const [displayedImageSize, setDisplayedImageSize] = useState<{ width: number; height: number } | null>(null);
+  const [isSettingOpen, setIsSettingOpen] = useState(false);
   const imageRef = useRef<HTMLImageElement>(null);
   const params = useParams();
   const { currentUser } = useAuth();
@@ -137,6 +145,11 @@ export default function HistoryDetailPage() {
           extracted_data: extractedData,
           imageUrl: downloadUrl,
           convertedImageUrl: convertedImageUrl,
+          setting: {
+            name: settingData.name || '設定名なし',
+            fields: settingData.fields || [],
+            prompt: settingData.prompt,
+          },
         });
 
       } catch (err) {
@@ -410,7 +423,7 @@ export default function HistoryDetailPage() {
 
         {/* --- 2. 抽出結果テーブル --- */}
         <div>
-          <h3 className="text-lg font-semibold mb-4">抽出結果</h3>
+          <h3 className="text-lg font-semibold mb-4 text-gray-900">抽出結果</h3>
           <div className="rounded-lg border border-gray-200 bg-white shadow-sm">
             {Object.keys(history.extracted_data).length === 0 ? (
               <div className="p-6 text-center text-gray-500">
@@ -454,6 +467,58 @@ export default function HistoryDetailPage() {
               </table>
             )}
           </div>
+
+          {/* --- OCR設定情報 --- */}
+          {history.setting && (
+            <div className="mt-6">
+              <button
+                onClick={() => setIsSettingOpen(!isSettingOpen)}
+                className="w-full flex items-center justify-between p-4 bg-gray-50 hover:bg-gray-100 rounded-lg border border-gray-200 transition-colors"
+              >
+                <h3 className="text-lg font-semibold text-gray-900">OCR設定</h3>
+                <svg
+                  className={`w-5 h-5 text-gray-600 transition-transform ${isSettingOpen ? 'rotate-180' : ''}`}
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                </svg>
+              </button>
+
+              {isSettingOpen && (
+                <div className="mt-2 rounded-lg border border-gray-200 bg-white shadow-sm p-4">
+                  <div className="mb-4">
+                    <h4 className="text-sm font-semibold text-gray-700 mb-2">設定名</h4>
+                    <p className="text-sm text-gray-900">{history.setting.name}</p>
+                  </div>
+
+                  <div className="mb-4">
+                    <h4 className="text-sm font-semibold text-gray-700 mb-2">抽出項目</h4>
+                    <div className="space-y-2">
+                      {history.setting.fields.map((field, index) => (
+                        <div key={index} className="bg-gray-50 rounded p-3">
+                          <div className="font-medium text-sm text-gray-900">{field.name}</div>
+                          {field.description && (
+                            <div className="text-sm text-gray-600 mt-1">{field.description}</div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  {history.setting.prompt && (
+                    <div>
+                      <h4 className="text-sm font-semibold text-gray-700 mb-2">プロンプト</h4>
+                      <div className="bg-gray-50 rounded p-3 text-sm text-gray-900 whitespace-pre-wrap font-mono">
+                        {history.setting.prompt}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
       </div>
