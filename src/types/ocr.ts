@@ -116,13 +116,13 @@ export interface OcrHistory {
 /**
  * 型ガード: ExtractedArrayDataかどうかを判定
  */
-export function isExtractedArrayData(data: ExtractedValue | ExtractedArrayData): data is ExtractedArrayData {
-  return 'items' in data && Array.isArray(data.items);
+export function isExtractedArrayData(data: ExtractedValue | ExtractedArrayData | null | undefined): data is ExtractedArrayData {
+  return !!data && typeof data === 'object' && 'items' in data && Array.isArray(data.items);
 }
 
 /**
  * 型ガード: ExtractedValueかどうかを判定
  */
-export function isExtractedValue(data: ExtractedValue | ExtractedArrayData): data is ExtractedValue {
-  return 'value' in data && typeof data.value === 'string';
+export function isExtractedValue(data: ExtractedValue | ExtractedArrayData | null | undefined): data is ExtractedValue {
+  return !!data && typeof data === 'object' && 'value' in data && typeof data.value === 'string';
 }

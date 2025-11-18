@@ -6,12 +6,8 @@ import Image from 'next/image';
 import dynamic from 'next/dynamic';
 import {
   Sparkles,
-  X,
   ArrowLeftRight,
   Image as ImageIcon,
-  Check,
-  Edit2,
-  Ban,
   ChevronDown,
   ChevronRight,
   Plus,
@@ -206,8 +202,6 @@ export default function OcrSettingForm({
   const [uploadedFile, setUploadedFile] = useState<File | null>(null);
   const [imagePreviewUrl, setImagePreviewUrl] = useState<string | null>(null);
 
-  const [editingField, setEditingField] = useState<string | null>(null);
-  const [tempEditInstruction, setTempEditInstruction] = useState('');
   const [expandedFields, setExpandedFields] = useState<Set<string>>(new Set());
 
   const [isAnalyzing, setIsAnalyzing] = useState(false);
@@ -359,9 +353,9 @@ export default function OcrSettingForm({
       if (result.success && result.data) {
         // 設定名を自動入力（帳票名から生成）
         // 後方互換性: type プロパティがない場合は 'single' をデフォルトとする
-        const normalizedFields = result.data.extractionFields.map((field: any) => ({
+        const normalizedFields = result.data.extractionFields.map((field: Partial<ExtractionField>) => ({
           ...field,
-          type: field.type || 'single',
+          type: (field.type || 'single') as 'single' | 'array',
         }));
 
         setFormData(prev => ({
@@ -390,32 +384,6 @@ export default function OcrSettingForm({
   const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     onSave(formData, uploadedFile);
-  };
-  
-  const handleEditClick = (field: ExtractionField) => {
-    setEditingField(field.name);
-    setTempEditInstruction(field.instruction);
-  };
-
-  const handleCancelEdit = () => {
-    setEditingField(null);
-    setTempEditInstruction('');
-  };
-
-  const handleSaveEdit = () => {
-    if (!editingField) return;
-
-    setFormData(prev => ({
-      ...prev,
-      extraction_fields: prev.extraction_fields.map(field => 
-        field.name === editingField 
-          ? { ...field, instruction: tempEditInstruction } 
-          : field
-      )
-    }));
-    
-    setEditingField(null);
-    setTempEditInstruction('');
   };
 
   // --- メインフォーム（UI） ---
@@ -672,7 +640,7 @@ export default function OcrSettingForm({
                             type="button"
                             onClick={() => handleDeleteField(field.name)}
                             className="text-red-600 hover:text-red-900 disabled:opacity-50"
-                            disabled={isLoading || !!editingField}
+                            disabled={isLoading}
                           >
                             <Trash2 className="h-4 w-4" />
                           </button>
@@ -728,7 +696,7 @@ export default function OcrSettingForm({
         <button
           type="submit"
           className="rounded-lg bg-green-800 py-2 px-4 font-semibold text-white hover:bg-green-700 disabled:opacity-50"
-          disabled={isLoading || !!editingField} 
+          disabled={isLoading}
         >
           {isLoading ? `${saveButtonText}中...` : saveButtonText}
         </button>
