@@ -86,7 +86,20 @@ export async function POST(request: NextRequest) {
   "extractionFields": [
     {
       "name": "フィールド名（英数字、キャメルケース）",
-      "instruction": "このフィールドの抽出指示（例：請求書の発行日）"
+      "instruction": "このフィールドの抽出指示（例：請求書の発行日）",
+      "type": "single"
+    },
+    {
+      "name": "配列フィールド名（英数字、キャメルケース）",
+      "instruction": "繰り返し項目の抽出指示（例：明細行の一覧）",
+      "type": "array",
+      "children": [
+        {
+          "name": "子フィールド名（英数字、キャメルケース）",
+          "instruction": "子フィールドの抽出指示（例：商品名）",
+          "type": "single"
+        }
+      ]
     }
   ]
 }
@@ -98,7 +111,12 @@ export async function POST(request: NextRequest) {
 4. フィールド名(name)は英語のキャメルケース（例：issueDate, companyName, totalAmount）
 5. 各フィールドのinstructionは日本語で具体的に記述
 6. 帳票の種類に応じて適切なフィールドを抽出（日付、金額、会社名、住所など）
-7. JSONのみを出力し、マークダウンのコードブロック（\`\`\`json）は使用しない
+7. typeフィールドは必須で、"single"（単一値）または"array"（配列・繰り返し項目）を指定
+8. type が "single" の場合、children は不要
+9. type が "array" の場合、children は必須で、配列の各要素に含まれる子フィールドを定義
+10. 配列フィールドの例：請求書の明細行、見積書の商品一覧、納品書の納品物リストなど
+11. 配列の子フィールドは通常 "type": "single" を使用
+12. JSONのみを出力し、マークダウンのコードブロック（\`\`\`json）は使用しない
 
 それでは、この帳票を解析して上記形式のJSONを生成してください。`;
 
