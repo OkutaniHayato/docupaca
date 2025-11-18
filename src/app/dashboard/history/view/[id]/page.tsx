@@ -1,8 +1,10 @@
 "use client";
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useParams } from 'next/navigation';
+import Link from 'next/link';
 import Image from 'next/image';
+import { TransformWrapper, TransformComponent } from 'react-zoom-pan-pinch';
 import { useAuth } from '@/context/AuthContext';
 import { db, storage } from '@/config/firebase';
 import { doc, getDoc } from 'firebase/firestore';
@@ -18,6 +20,13 @@ interface ExtractedData {
   [key: string]: ExtractedField;
 }
 
+interface OcrSetting {
+  name: string;
+  fields: Array<{ name: string; description: string }>;
+  prompt?: string;
+  model?: string;
+}
+
 interface HistoryDetail {
   id: string;
   status: string;
@@ -26,6 +35,8 @@ interface HistoryDetail {
   extracted_data: ExtractedData;
   imageUrl: string | null;
   convertedImageUrl: string | null; // 変換された画像のURL
+  setting?: OcrSetting; // OCR設定情報
+  setting_id?: string; // OCR設定ID
 }
 
 /**
@@ -36,6 +47,8 @@ export default function HistoryDetailPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [imageDimensions, setImageDimensions] = useState<{ width: number; height: number } | null>(null);
+  const [displayedImageSize, setDisplayedImageSize] = useState<{ width: number; height: number } | null>(null);
+  const imageRef = useRef<HTMLImageElement>(null);
   const params = useParams();
   const { currentUser } = useAuth();
 
@@ -59,18 +72,26 @@ export default function HistoryDetailPage() {
         }
 
         const data = historySnap.data();
+        console.log('History data:', data);
+        console.log('Setting ID:', data.setting_id);
 
         // 2. この履歴の setting_id が、現在のユーザーが所有する設定かチェック
+        if (!data.setting_id) {
+          console.warn('No setting_id found in history data');
+        }
+
         const settingRef = doc(db, "ocr_settings", data.setting_id);
         const settingSnap = await getDoc(settingRef);
 
         if (!settingSnap.exists()) {
+          console.error('Setting not found for ID:', data.setting_id);
           setError("関連する設定が見つかりません。");
           setIsLoading(false);
           return;
         }
 
         const settingData = settingSnap.data();
+        console.log('Setting data:', settingData);
 
         // 3. 権限チェック: 設定の owner_id が現在のユーザーと一致するか確認
         if (settingData.owner_id !== currentUser.uid) {
@@ -126,7 +147,7 @@ export default function HistoryDetailPage() {
 
         console.log('extracted_data keys:', Object.keys(extractedData));
 
-        setHistory({
+        const historyDetail: HistoryDetail = {
           id: historySnap.id,
           status: data.status,
           original_file_path: data.original_file_path,
@@ -134,7 +155,19 @@ export default function HistoryDetailPage() {
           extracted_data: extractedData,
           imageUrl: downloadUrl,
           convertedImageUrl: convertedImageUrl,
-        });
+          setting_id: data.setting_id,
+          setting: {
+            name: settingData.name || '設定名なし',
+            fields: settingData.extraction_fields || [],
+            prompt: settingData.prompt_text,
+            model: settingData.model_name,
+          },
+        };
+
+        console.log('Final history detail:', historyDetail);
+        console.log('Setting info:', historyDetail.setting);
+
+        setHistory(historyDetail);
 
       } catch (err) {
         console.error("Error fetching history detail: ", err);
@@ -224,67 +257,164 @@ export default function HistoryDetailPage() {
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
 
         {/* --- 1. 元画像/PDFとハイライト表示 --- */}
-        <div className="relative border border-gray-300 rounded-lg overflow-hidden">
+        <div className="border border-gray-300 rounded-lg overflow-hidden bg-gray-50">
           {/* 変換された画像または元画像を表示 */}
           {history.convertedImageUrl || history.imageUrl ? (
-            <div className="relative">
-              <Image
-                src={history.convertedImageUrl || history.imageUrl!}
-                alt="Original Document"
-                className="w-full h-auto"
-                width={800}
-                height={1100}
-                priority
-                onLoad={(e) => {
-                  const img = e.target as HTMLImageElement;
-                  setImageDimensions({
-                    width: img.naturalWidth,
-                    height: img.naturalHeight,
-                  });
-                }}
-              />
+            <div>
+              {/* ズーム操作説明 */}
+              <div className="bg-blue-50 border-b border-blue-200 px-4 py-2 text-sm text-blue-800">
+                マウスホイールでズーム、ドラッグで移動できます
+              </div>
 
-              {/* --- ハイライトボックス（BBox） --- */}
-              {imageDimensions && Object.keys(history.extracted_data).map(key => {
-                const field = history.extracted_data[key];
+              <div className="relative">
+                <TransformWrapper
+                  initialScale={1}
+                  minScale={0.5}
+                  maxScale={4}
+                  centerOnInit={true}
+                >
+                  {({ zoomIn, zoomOut, resetTransform }) => (
+                    <>
+                      {/* ズームコントロールボタン */}
+                      <div className="absolute top-4 right-4 z-10 flex flex-col gap-2">
+                        <button
+                          onClick={() => zoomIn()}
+                          className="bg-white border border-gray-300 rounded-lg p-2 shadow-md hover:bg-gray-100"
+                          title="拡大"
+                        >
+                          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                          </svg>
+                        </button>
+                        <button
+                          onClick={() => zoomOut()}
+                          className="bg-white border border-gray-300 rounded-lg p-2 shadow-md hover:bg-gray-100"
+                          title="縮小"
+                        >
+                          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20 12H4" />
+                          </svg>
+                        </button>
+                        <button
+                          onClick={() => resetTransform()}
+                          className="bg-white border border-gray-300 rounded-lg p-2 shadow-md hover:bg-gray-100"
+                          title="リセット"
+                        >
+                          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                          </svg>
+                        </button>
+                      </div>
 
-                // fieldがオブジェクトで、bboxプロパティがあることを確認
-                if (!field || typeof field !== 'object' || !field.bbox) {
-                  return null;
-                }
+                      <TransformComponent
+                      wrapperStyle={{
+                        width: '100%',
+                        height: 'calc(100vh - 250px)',
+                        cursor: 'grab'
+                      }}
+                      contentStyle={{
+                        width: '100%',
+                        height: '100%',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center'
+                      }}
+                    >
+                      <div className="relative inline-block">
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
+                          ref={imageRef}
+                          src={history.convertedImageUrl || history.imageUrl!}
+                          alt="Original Document"
+                          className="max-h-[calc(100vh-250px)] w-auto h-auto"
+                          onLoad={(e) => {
+                            const img = e.target as HTMLImageElement;
+                            console.log('Image loaded:', {
+                              naturalWidth: img.naturalWidth,
+                              naturalHeight: img.naturalHeight,
+                              displayWidth: img.width,
+                              displayHeight: img.height,
+                              clientWidth: img.clientWidth,
+                              clientHeight: img.clientHeight
+                            });
+                            setImageDimensions({
+                              width: img.naturalWidth,
+                              height: img.naturalHeight,
+                            });
+                            setDisplayedImageSize({
+                              width: img.clientWidth,
+                              height: img.clientHeight,
+                            });
+                          }}
+                        />
 
-                const [x1, y1, x2, y2] = field.bbox;
+                        {/* --- ハイライトボックス（BBox） --- */}
+                        {imageDimensions && Object.keys(history.extracted_data).map(key => {
+                          const field = history.extracted_data[key];
 
-                // bbox座標が有効かチェック（すべてが0の場合はスキップ）
-                if (x1 === 0 && y1 === 0 && x2 === 0 && y2 === 0) {
-                  return null;
-                }
+                          // fieldがオブジェクトで、bboxプロパティがあることを確認
+                          if (!field || typeof field !== 'object' || !field.bbox) {
+                            console.log(`Skipping ${key}: no bbox`, field);
+                            return null;
+                          }
 
-                // bbox座標を正規化（0-1の範囲と仮定）
-                // Gemini APIは通常、正規化された座標を返すため
-                const left = (x1 * 100).toFixed(2);
-                const top = (y1 * 100).toFixed(2);
-                const width = ((x2 - x1) * 100).toFixed(2);
-                const height = ((y2 - y1) * 100).toFixed(2);
+                          const bbox = field.bbox;
+                          console.log(`Processing ${key}:`, { bbox, value: field.value });
 
-                return (
-                  <div
-                    key={key}
-                    title={`${key}: ${field.value}`}
-                    className="absolute border-2 border-green-600 bg-green-600 bg-opacity-10 opacity-70 hover:opacity-100 transition-opacity"
-                    style={{
-                      left: `${left}%`,
-                      top: `${top}%`,
-                      width: `${width}%`,
-                      height: `${height}%`,
-                    }}
-                  >
-                    <span className="absolute -top-5 left-0 text-xs bg-green-600 text-white px-1 rounded">
-                      {key}
-                    </span>
-                  </div>
-                );
-              })}
+                          // bbox座標を取得
+                          let [x1, y1, x2, y2] = bbox;
+
+                          // bbox座標が有効かチェック（すべてが0の場合はスキップ）
+                          if (x1 === 0 && y1 === 0 && x2 === 0 && y2 === 0) {
+                            console.log(`Skipping ${key}: all zeros`);
+                            return null;
+                          }
+
+                          // bbox座標が正規化されているか確認（0-1の範囲）
+                          const isNormalized = x1 <= 1 && y1 <= 1 && x2 <= 1 && y2 <= 1;
+
+                          // ピクセル座標の場合は正規化する
+                          if (!isNormalized) {
+                            console.log(`${key}: Converting pixel to normalized coordinates`);
+                            x1 = x1 / imageDimensions.width;
+                            y1 = y1 / imageDimensions.height;
+                            x2 = x2 / imageDimensions.width;
+                            y2 = y2 / imageDimensions.height;
+                          }
+
+                          // パーセンテージで座標を設定（ズームに追従する）
+                          const left = (x1 * 100).toFixed(2);
+                          const top = (y1 * 100).toFixed(2);
+                          const width = ((x2 - x1) * 100).toFixed(2);
+                          const height = ((y2 - y1) * 100).toFixed(2);
+
+                          console.log(`${key} position (percentage):`, { left: `${left}%`, top: `${top}%`, width: `${width}%`, height: `${height}%` });
+
+                          return (
+                            <div
+                              key={key}
+                              title={`${key}: ${field.value}`}
+                              className="absolute border-2 border-green-600 bg-green-600 bg-opacity-10 opacity-70 hover:opacity-100 transition-opacity"
+                              style={{
+                                left: `${left}%`,
+                                top: `${top}%`,
+                                width: `${width}%`,
+                                height: `${height}%`,
+                                pointerEvents: 'none'
+                              }}
+                            >
+                              <span className="absolute -top-5 left-0 text-xs bg-green-600 text-white px-1 rounded whitespace-nowrap">
+                                {key}
+                              </span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </TransformComponent>
+                  </>
+                )}
+              </TransformWrapper>
+              </div>
             </div>
           ) : (
             <div className="flex items-center justify-center bg-gray-100 p-12 min-h-[300px]">
@@ -312,7 +442,7 @@ export default function HistoryDetailPage() {
 
         {/* --- 2. 抽出結果テーブル --- */}
         <div>
-          <h3 className="text-lg font-semibold mb-4">抽出結果</h3>
+          <h3 className="text-lg font-semibold mb-4 text-gray-900">抽出結果</h3>
           <div className="rounded-lg border border-gray-200 bg-white shadow-sm">
             {Object.keys(history.extracted_data).length === 0 ? (
               <div className="p-6 text-center text-gray-500">
@@ -356,6 +486,46 @@ export default function HistoryDetailPage() {
               </table>
             )}
           </div>
+
+          {/* --- OCR設定情報 --- */}
+          {(() => {
+            console.log('Rendering OCR settings section');
+            console.log('history:', history);
+            console.log('history.setting:', history?.setting);
+            console.log('history.setting_id:', history?.setting_id);
+            return null;
+          })()}
+          {history.setting && (
+            <div className="mt-6">
+              <div className="rounded-lg border border-gray-200 bg-white shadow-sm p-4">
+                <div className="flex justify-between items-center mb-4">
+                  <h3 className="text-lg font-semibold text-gray-900">OCR設定</h3>
+                  <Link
+                    href={`/dashboard/settings/edit/${history.setting_id}`}
+                    className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm font-medium inline-block"
+                  >
+                    設定を編集
+                  </Link>
+                </div>
+
+                {history.setting.model && (
+                  <div className="mb-4">
+                    <h4 className="text-sm font-semibold text-gray-700 mb-2">モデル</h4>
+                    <p className="text-sm text-gray-900">{history.setting.model}</p>
+                  </div>
+                )}
+
+                {history.setting.prompt && (
+                  <div>
+                    <h4 className="text-sm font-semibold text-gray-700 mb-2">抽出指示</h4>
+                    <div className="bg-gray-50 rounded p-3 text-sm text-gray-900 whitespace-pre-wrap font-mono">
+                      {history.setting.prompt}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
         </div>
 
       </div>
