@@ -113,15 +113,57 @@ async function verifyApiKey(apiKey: string): Promise<string | null> {
   }
 }
 
+// 拡張されたOCR型定義（ネスト構造対応）
+
+/**
+ * 抽出フィールドの定義
+ * - single: 単一値フィールド（例: 請求書番号、発行日）
+ * - array: 繰り返し構造フィールド（例: 明細行、商品リスト）
+ */
+interface ExtractionField {
+  name: string;
+  instruction: string;
+  type: 'single' | 'array';
+  children?: ExtractionField[]; // type='array'の場合のみ使用
+}
+
+/**
+ * バウンディングボックス座標
+ * [x_min, y_min, x_max, y_max]
+ */
+type BBox = [number, number, number, number];
+
+/**
+ * 抽出された単一値
+ */
+interface ExtractedValue {
+  value: string;
+  bbox: BBox;
+}
+
+/**
+ * 抽出された配列データ
+ */
+interface ExtractedArrayData {
+  items: Array<{
+    [childFieldName: string]: ExtractedValue;
+  }>;
+  bbox?: BBox; // 配列全体のbbox（オプション）
+}
+
+/**
+ * 抽出データ全体（ネスト構造対応）
+ */
+type ExtractedData = {
+  [fieldName: string]: ExtractedValue | ExtractedArrayData;
+};
+
 // OCR設定のデータ型
 interface OcrSetting {
   name: string;
   owner_id: string;
   prompt_text: string;
-  extraction_fields: Array<{
-    name: string;
-    instruction: string;
-  }>;
+  extraction_fields: ExtractionField[];
   model_name: string;
   created_at: admin.firestore.Timestamp;
 }
@@ -131,12 +173,7 @@ interface OcrHistory {
   setting_id: string;
   status: 'processing' | 'completed' | 'failed';
   original_file_path: string;
-  extracted_data?: {
-    [key: string]: {
-      value: string;
-      bbox: [number, number, number, number];
-    };
-  };
+  extracted_data?: ExtractedData;
   error_message?: string;
   executed_at: admin.firestore.Timestamp;
 }
@@ -146,6 +183,60 @@ interface ExecuteOcrRequest {
   setting_id: string;
   file_path: string;
   user_id: string;
+}
+
+/**
+ * ExtractionFieldsからJSONスキーマを動的生成
+ * Gemini APIに渡すプロンプト用のスキーマ例を作成
+ */
+function generateJsonSchemaFromFields(fields: ExtractionField[]): string {
+  const schema: Record<string, unknown> = {};
+
+  for (const field of fields) {
+    if (field.type === 'single') {
+      // 単一値フィールド
+      schema[field.name] = {
+        value: '抽出された値',
+        bbox: [0, 0, 0, 0],
+      };
+    } else if (field.type === 'array' && field.children) {
+      // 配列フィールド
+      const childSchema: Record<string, unknown> = {};
+      for (const child of field.children) {
+        childSchema[child.name] = {
+          value: '抽出された値',
+          bbox: [0, 0, 0, 0],
+        };
+      }
+
+      schema[field.name] = {
+        items: [childSchema],
+        bbox: [0, 0, 0, 0], // オプション
+      };
+    }
+  }
+
+  return JSON.stringify(schema, null, 2);
+}
+
+/**
+ * ExtractionFieldsからプロンプト用のフィールド説明を生成
+ */
+function generateFieldDescriptions(fields: ExtractionField[], indent = 0): string {
+  const lines: string[] = [];
+  const prefix = '  '.repeat(indent);
+
+  for (const field of fields) {
+    if (field.type === 'single') {
+      lines.push(`${prefix}- ${field.name}: ${field.instruction}`);
+    } else if (field.type === 'array' && field.children) {
+      lines.push(`${prefix}- ${field.name} (配列): ${field.instruction}`);
+      lines.push(`${prefix}  子フィールド:`);
+      lines.push(generateFieldDescriptions(field.children, indent + 2));
+    }
+  }
+
+  return lines.join('\n');
 }
 
 /**
@@ -269,10 +360,9 @@ export const executeOcr = functions.https.onCall(
       const genAI = new GoogleGenerativeAI(apiKey);
       const model = genAI.getGenerativeModel({ model: setting.model_name });
 
-      // プロンプト作成
-      const extractionFieldsDescription = setting.extraction_fields
-        .map(field => `- ${field.name}: ${field.instruction}`)
-        .join('\n');
+      // プロンプト作成（ネスト構造対応）
+      const extractionFieldsDescription = generateFieldDescriptions(setting.extraction_fields);
+      const jsonSchemaExample = generateJsonSchemaFromFields(setting.extraction_fields);
 
       const prompt = `${setting.prompt_text}
 
@@ -282,15 +372,14 @@ ${extractionFieldsDescription}
 【出力形式】
 以下のJSON形式で出力してください。JSONのみを出力し、他の説明文は含めないでください。
 
-{
-  "${setting.extraction_fields[0]?.name || 'fieldName'}": {
-    "value": "抽出された値",
-    "bbox": [x1, y1, x2, y2]
-  }
-}
+${jsonSchemaExample}
 
-各フィールドについて、valueには抽出された値を、bboxには該当箇所の座標を[左上x, 左上y, 右下x, 右下y]の形式で記載してください。
-座標が不明な場合は[0, 0, 0, 0]としてください。`;
+重要な注意事項:
+1. 単一値フィールドは {"value": "抽出された値", "bbox": [x1, y1, x2, y2]} の形式
+2. 配列フィールドは {"items": [...], "bbox": [x1, y1, x2, y2]} の形式
+3. 配列の各要素は子フィールドのオブジェクト
+4. bboxは該当箇所の座標を[左上x, 左上y, 右下x, 右下y]の形式で記載（正規化座標0-1推奨）
+5. 座標が不明な場合は[0, 0, 0, 0]としてください`;
 
       functions.logger.info('Gemini API呼び出し開始');
 
@@ -547,10 +636,9 @@ export const ocrApi = functions.https.onRequest(
       const genAI = new GoogleGenerativeAI(apiKeyValue);
       const model = genAI.getGenerativeModel({ model: setting.model_name });
 
-      // プロンプト作成
-      const extractionFieldsDescription = setting.extraction_fields
-        .map(field => `- ${field.name}: ${field.instruction}`)
-        .join('\n');
+      // プロンプト作成（ネスト構造対応）
+      const extractionFieldsDescription = generateFieldDescriptions(setting.extraction_fields);
+      const jsonSchemaExample = generateJsonSchemaFromFields(setting.extraction_fields);
 
       const prompt = `${setting.prompt_text}
 
@@ -560,15 +648,14 @@ ${extractionFieldsDescription}
 【出力形式】
 以下のJSON形式で出力してください。JSONのみを出力し、他の説明文は含めないでください。
 
-{
-  "${setting.extraction_fields[0]?.name || 'fieldName'}": {
-    "value": "抽出された値",
-    "bbox": [x1, y1, x2, y2]
-  }
-}
+${jsonSchemaExample}
 
-各フィールドについて、valueには抽出された値を、bboxには該当箇所の座標を[左上x, 左上y, 右下x, 右下y]の形式で記載してください。
-座標が不明な場合は[0, 0, 0, 0]としてください。`;
+重要な注意事項:
+1. 単一値フィールドは {"value": "抽出された値", "bbox": [x1, y1, x2, y2]} の形式
+2. 配列フィールドは {"items": [...], "bbox": [x1, y1, x2, y2]} の形式
+3. 配列の各要素は子フィールドのオブジェクト
+4. bboxは該当箇所の座標を[左上x, 左上y, 右下x, 右下y]の形式で記載（正規化座標0-1推奨）
+5. 座標が不明な場合は[0, 0, 0, 0]としてください`;
 
       functions.logger.info('Calling Gemini API...');
 
