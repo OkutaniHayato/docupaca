@@ -353,10 +353,23 @@ export default function OcrSettingForm({
       if (result.success && result.data) {
         // 設定名を自動入力（帳票名から生成）
         // 後方互換性: type プロパティがない場合は 'single' をデフォルトとする
-        const normalizedFields = result.data.extractionFields.map((field: Partial<ExtractionField>) => ({
-          ...field,
-          type: (field.type || 'single') as 'single' | 'array',
-        }));
+        // 再帰的に type と children を正規化する関数
+        const normalizeField = (field: Partial<ExtractionField>): ExtractionField => {
+          const normalizedField: ExtractionField = {
+            name: field.name || '',
+            instruction: field.instruction || '',
+            type: (field.type || 'single') as 'single' | 'array',
+          };
+
+          // 配列フィールドの場合、子フィールドも再帰的に正規化
+          if (normalizedField.type === 'array' && field.children && Array.isArray(field.children)) {
+            normalizedField.children = field.children.map(normalizeField);
+          }
+
+          return normalizedField;
+        };
+
+        const normalizedFields = result.data.extractionFields.map(normalizeField);
 
         setFormData(prev => ({
           ...prev,
