@@ -11,8 +11,13 @@ import {
   Image as ImageIcon,
   Check,
   Edit2,
-  Ban
+  Ban,
+  ChevronDown,
+  ChevronRight,
+  Plus,
+  Trash2
 } from 'lucide-react';
+import { ExtractionField } from '@/types/ocr';
 
 // PDFプレビューコンポーネントを動的インポート（SSR無効化）
 const PdfPreview = dynamic(
@@ -27,12 +32,7 @@ const PdfPreview = dynamic(
   }
 );
 
-
-// 抽出フィールドの型定義
-export interface ExtractionField {
-  name: string; 
-  instruction: string;
-}
+// OCR設定フォームのデータ型
 export interface OcrSettingFormData {
   name: string;
   model_name: string;
@@ -40,6 +40,9 @@ export interface OcrSettingFormData {
   extraction_fields: ExtractionField[];
   sample_file_path?: string; // Firebase Storageのファイルパス
 }
+
+// 後方互換性のため、ExtractionFieldを再エクスポート
+export type { ExtractionField };
 
 interface OcrSettingFormProps {
   initialData?: OcrSettingFormData;
@@ -161,7 +164,15 @@ export default function OcrSettingForm({
   // initialDataが変更されたときにformDataを更新
   useEffect(() => {
     if (initialData) {
-      setFormData(initialData);
+      // 後方互換性: type プロパティがない場合は 'single' をデフォルトとする
+      const normalizedData = {
+        ...initialData,
+        extraction_fields: initialData.extraction_fields.map(field => ({
+          ...field,
+          type: field.type || 'single',
+        }))
+      };
+      setFormData(normalizedData);
 
       // サンプルファイルがある場合はStorageから読み込んでプレビュー表示
       if (initialData.sample_file_path) {
@@ -186,6 +197,10 @@ export default function OcrSettingForm({
 
   const [newFieldName, setNewFieldName] = useState('');
   const [newFieldInstruction, setNewFieldInstruction] = useState('');
+  const [newFieldType, setNewFieldType] = useState<'single' | 'array'>('single');
+  const [newChildFields, setNewChildFields] = useState<Array<{name: string, instruction: string}>>([]);
+  const [tempChildName, setTempChildName] = useState('');
+  const [tempChildInstruction, setTempChildInstruction] = useState('');
 
   const [layout, setLayout] = useState<'form-left' | 'form-right'>('form-left');
   const [uploadedFile, setUploadedFile] = useState<File | null>(null);
@@ -193,6 +208,7 @@ export default function OcrSettingForm({
 
   const [editingField, setEditingField] = useState<string | null>(null);
   const [tempEditInstruction, setTempEditInstruction] = useState('');
+  const [expandedFields, setExpandedFields] = useState<Set<string>>(new Set());
 
   const [isAnalyzing, setIsAnalyzing] = useState(false);
 
@@ -230,16 +246,80 @@ export default function OcrSettingForm({
   };
 
   const handleAddField = () => {
-    if (newFieldName && newFieldInstruction) {
-      if (formData.extraction_fields.some(field => field.name === newFieldName)) {
-        alert("エラー: 項目名 (name) が重複しています。");
-        return;
-      }
-      const newField: ExtractionField = { name: newFieldName, instruction: newFieldInstruction };
-      setFormData(prev => ({ ...prev, extraction_fields: [...prev.extraction_fields, newField] }));
-      setNewFieldName('');
-      setNewFieldInstruction('');
+    if (!newFieldName || !newFieldInstruction) {
+      alert("項目名と抽出指示を入力してください。");
+      return;
     }
+
+    if (formData.extraction_fields.some(field => field.name === newFieldName)) {
+      alert("エラー: 項目名 (name) が重複しています。");
+      return;
+    }
+
+    if (newFieldType === 'array' && newChildFields.length === 0) {
+      alert("配列フィールドには少なくとも1つの子フィールドが必要です。");
+      return;
+    }
+
+    const newField: ExtractionField = {
+      name: newFieldName,
+      instruction: newFieldInstruction,
+      type: newFieldType,
+      ...(newFieldType === 'array' && {
+        children: newChildFields.map(child => ({
+          name: child.name,
+          instruction: child.instruction,
+          type: 'single' as const,
+        }))
+      })
+    };
+
+    setFormData(prev => ({
+      ...prev,
+      extraction_fields: [...prev.extraction_fields, newField]
+    }));
+
+    // リセット
+    setNewFieldName('');
+    setNewFieldInstruction('');
+    setNewFieldType('single');
+    setNewChildFields([]);
+  };
+
+  const handleAddChildField = () => {
+    if (!tempChildName || !tempChildInstruction) {
+      alert("子フィールド名と抽出指示を入力してください。");
+      return;
+    }
+
+    if (newChildFields.some(child => child.name === tempChildName)) {
+      alert("エラー: 子フィールド名が重複しています。");
+      return;
+    }
+
+    setNewChildFields(prev => [
+      ...prev,
+      { name: tempChildName, instruction: tempChildInstruction }
+    ]);
+
+    setTempChildName('');
+    setTempChildInstruction('');
+  };
+
+  const handleDeleteChildField = (childName: string) => {
+    setNewChildFields(prev => prev.filter(child => child.name !== childName));
+  };
+
+  const toggleFieldExpansion = (fieldName: string) => {
+    setExpandedFields(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(fieldName)) {
+        newSet.delete(fieldName);
+      } else {
+        newSet.add(fieldName);
+      }
+      return newSet;
+    });
   };
 
   const handleDeleteField = (fieldName: string) => {
@@ -278,11 +358,17 @@ export default function OcrSettingForm({
 
       if (result.success && result.data) {
         // 設定名を自動入力（帳票名から生成）
+        // 後方互換性: type プロパティがない場合は 'single' をデフォルトとする
+        const normalizedFields = result.data.extractionFields.map((field: any) => ({
+          ...field,
+          type: field.type || 'single',
+        }));
+
         setFormData(prev => ({
           ...prev,
           name: `${result.data.documentName}の設定`,
           prompt_text: result.data.extractionInstruction,
-          extraction_fields: result.data.extractionFields,
+          extraction_fields: normalizedFields,
         }));
 
         alert('AI解析が完了しました！設定が自動入力されました。');
@@ -417,13 +503,45 @@ export default function OcrSettingForm({
             {isAnalyzing ? '解析中...' : 'AIで自動生成'}
           </button>
         </div>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-2">
+        {/* フィールドタイプ選択 */}
+        <div className="mt-4">
+          <label className="block text-sm font-medium text-gray-700 mb-2">
+            フィールドタイプ
+          </label>
+          <div className="flex gap-4">
+            <label className="flex items-center">
+              <input
+                type="radio"
+                value="single"
+                checked={newFieldType === 'single'}
+                onChange={(e) => setNewFieldType(e.target.value as 'single' | 'array')}
+                className="mr-2"
+                disabled={isLoading}
+              />
+              <span className="text-sm text-gray-700">単一値</span>
+            </label>
+            <label className="flex items-center">
+              <input
+                type="radio"
+                value="array"
+                checked={newFieldType === 'array'}
+                onChange={(e) => setNewFieldType(e.target.value as 'single' | 'array')}
+                className="mr-2"
+                disabled={isLoading}
+              />
+              <span className="text-sm text-gray-700">配列（繰り返し項目）</span>
+            </label>
+          </div>
+        </div>
+
+        {/* 基本情報入力 */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-4">
           <input
             type="text"
             value={newFieldName}
             onChange={(e) => setNewFieldName(e.target.value)}
             className="block w-full rounded-md border border-gray-300 px-3 py-2 text-gray-900 placeholder-gray-500 shadow-sm focus:border-green-500 focus:ring-2 focus:ring-green-500 disabled:opacity-50"
-            placeholder="項目名 (例: totalAmount)"
+            placeholder="項目名 (例: lineItems)"
             disabled={isLoading}
           />
           <input
@@ -431,17 +549,77 @@ export default function OcrSettingForm({
             value={newFieldInstruction}
             onChange={(e) => setNewFieldInstruction(e.target.value)}
             className="md:col-span-2 block w-full rounded-md border border-gray-300 px-3 py-2 text-gray-900 placeholder-gray-500 shadow-sm focus:border-green-500 focus:ring-2 focus:ring-green-500 disabled:opacity-50"
-            placeholder="抽出指示 (例: 請求書の合計金額)"
+            placeholder={newFieldType === 'array' ? '抽出指示 (例: 請求書の明細行リスト)' : '抽出指示 (例: 請求書の合計金額)'}
             disabled={isLoading}
           />
         </div>
+
+        {/* 配列フィールドの子フィールド管理 */}
+        {newFieldType === 'array' && (
+          <div className="mt-4 pl-6 border-l-4 border-green-200 bg-green-50 p-4 rounded">
+            <h4 className="text-sm font-medium text-gray-900 mb-3">子フィールド（配列の各項目に含まれる情報）</h4>
+
+            {/* 子フィールドリスト */}
+            {newChildFields.length > 0 && (
+              <div className="mb-3 space-y-2">
+                {newChildFields.map((child, index) => (
+                  <div key={index} className="flex items-center justify-between bg-white p-2 rounded border border-gray-200">
+                    <div className="flex-1">
+                      <span className="font-medium text-sm text-gray-900">{child.name}</span>
+                      <span className="text-sm text-gray-500 ml-2">- {child.instruction}</span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => handleDeleteChildField(child.name)}
+                      className="ml-2 text-red-600 hover:text-red-800"
+                      disabled={isLoading}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* 子フィールド追加フォーム */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
+              <input
+                type="text"
+                value={tempChildName}
+                onChange={(e) => setTempChildName(e.target.value)}
+                className="block w-full rounded-md border border-gray-300 px-2 py-1.5 text-sm text-gray-900 placeholder-gray-500 shadow-sm focus:border-green-500 focus:ring-2 focus:ring-green-500 disabled:opacity-50"
+                placeholder="子フィールド名 (例: itemName)"
+                disabled={isLoading}
+              />
+              <input
+                type="text"
+                value={tempChildInstruction}
+                onChange={(e) => setTempChildInstruction(e.target.value)}
+                className="md:col-span-2 block w-full rounded-md border border-gray-300 px-2 py-1.5 text-sm text-gray-900 placeholder-gray-500 shadow-sm focus:border-green-500 focus:ring-2 focus:ring-green-500 disabled:opacity-50"
+                placeholder="抽出指示 (例: 商品名)"
+                disabled={isLoading}
+              />
+            </div>
+            <button
+              type="button"
+              onClick={handleAddChildField}
+              className="mt-2 flex items-center gap-1 rounded-md bg-green-600 py-1.5 px-3 text-sm font-semibold text-white hover:bg-green-500 disabled:opacity-50"
+              disabled={isLoading}
+            >
+              <Plus className="h-4 w-4" />
+              子フィールドを追加
+            </button>
+          </div>
+        )}
+
+        {/* フィールド追加ボタン */}
         <button
           type="button"
           onClick={handleAddField}
-          className="mt-3 shrink-0 rounded-lg bg-gray-600 py-2 px-4 font-semibold text-white hover:bg-gray-500 disabled:opacity-50"
+          className="mt-4 shrink-0 rounded-lg bg-gray-600 py-2 px-4 font-semibold text-white hover:bg-gray-500 disabled:opacity-50"
           disabled={isLoading}
         >
-          追加
+          フィールドを追加
         </button>
         
          <div className="mt-6 flow-root">
@@ -450,8 +628,9 @@ export default function OcrSettingForm({
               <table className="min-w-full divide-y divide-gray-300">
                  <thead>
                   <tr>
-                    <th scope="col" className="py-3.5 pl-4 pr-3 text-left text-sm font-semibold text-gray-900 sm:pl-0">項目名 (name)</th>
-                    <th scope="col" className="px-3 py-3.5 text-left text-sm font-semibold text-gray-900">抽出指示 (instruction)</th>
+                    <th scope="col" className="py-3.5 pl-4 pr-3 text-left text-sm font-semibold text-gray-900 sm:pl-0">項目名</th>
+                    <th scope="col" className="px-3 py-3.5 text-left text-sm font-semibold text-gray-900">タイプ</th>
+                    <th scope="col" className="px-3 py-3.5 text-left text-sm font-semibold text-gray-900">抽出指示</th>
                     <th scope="col" className="relative py-3.5 pl-3 pr-4 sm:pr-0">
                       <span className="sr-only">アクション</span>
                     </th>
@@ -459,66 +638,74 @@ export default function OcrSettingForm({
                 </thead>
                 <tbody className="divide-y divide-gray-200">
                   {formData.extraction_fields.map((field) => (
-                    <tr key={field.name}>
-                      {editingField === field.name ? (
-                        <>
-                          <td className="whitespace-nowrap py-4 pl-4 pr-3 text-sm font-medium text-gray-900 sm:pl-0">
-                            {field.name}
-                          </td>
-                          <td className="whitespace-nowrap px-3 py-4 text-sm text-gray-500">
-                            <input
-                              type="text"
-                              value={tempEditInstruction}
-                              onChange={(e) => setTempEditInstruction(e.target.value)}
-                              className="block w-full rounded-md border border-gray-300 px-2 py-1 text-gray-900 shadow-sm focus:border-green-500 focus:ring-2 focus:ring-green-500"
-                            />
-                          </td>
-                          <td className="relative whitespace-nowrap py-4 pl-3 pr-4 text-right text-sm font-medium sm:pr-0">
-                            <button
-                              type="button"
-                              onClick={handleSaveEdit}
-                              className="text-green-600 hover:text-green-900"
-                            >
-                              <Check className="h-4 w-4" />
-                            </button>
-                            <button
-                              type="button"
-                              onClick={handleCancelEdit}
-                              className="ml-2 text-gray-500 hover:text-gray-800"
-                            >
-                              <Ban className="h-4 w-4" />
-                            </button>
-                          </td>
-                        </>
-                      ) : (
-                        <>
-                          <td className="whitespace-nowrap py-4 pl-4 pr-3 text-sm font-medium text-gray-900 sm:pl-0">{field.name}</td>
-                          <td className="whitespace-nowrap px-3 py-4 text-sm text-gray-500">{field.instruction}</td>
-                          <td className="relative whitespace-nowrap py-4 pl-3 pr-4 text-right text-sm font-medium sm:pr-0">
-                            <button
-                              type="button"
-                              onClick={() => handleEditClick(field)}
-                              className="text-green-600 hover:text-green-900 disabled:opacity-50"
-                              disabled={isLoading || !!editingField} 
-                            >
-                              <Edit2 className="h-4 w-4" />
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => handleDeleteField(field.name)}
-                              className="ml-2 text-red-600 hover:text-red-900 disabled:opacity-50"
-                              disabled={isLoading || !!editingField} 
-                            >
-                              <X className="h-4 w-4" />
-                            </button>
-                          </td>
-                        </>
+                    <React.Fragment key={field.name}>
+                      {/* 親フィールド行 */}
+                      <tr className={field.type === 'array' ? 'bg-green-50' : ''}>
+                        <td className="py-4 pl-4 pr-3 text-sm font-medium text-gray-900 sm:pl-0">
+                          <div className="flex items-center gap-2">
+                            {field.type === 'array' && field.children && field.children.length > 0 && (
+                              <button
+                                type="button"
+                                onClick={() => toggleFieldExpansion(field.name)}
+                                className="text-gray-600 hover:text-gray-900"
+                              >
+                                {expandedFields.has(field.name) ? (
+                                  <ChevronDown className="h-4 w-4" />
+                                ) : (
+                                  <ChevronRight className="h-4 w-4" />
+                                )}
+                              </button>
+                            )}
+                            <span>{field.name}</span>
+                          </div>
+                        </td>
+                        <td className="px-3 py-4 text-sm text-gray-500">
+                          <span className={`inline-flex items-center rounded-full px-2 py-1 text-xs font-medium ${
+                            field.type === 'array' ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'
+                          }`}>
+                            {field.type === 'array' ? '配列' : '単一値'}
+                          </span>
+                        </td>
+                        <td className="px-3 py-4 text-sm text-gray-500">{field.instruction}</td>
+                        <td className="relative py-4 pl-3 pr-4 text-right text-sm font-medium sm:pr-0">
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteField(field.name)}
+                            className="text-red-600 hover:text-red-900 disabled:opacity-50"
+                            disabled={isLoading || !!editingField}
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </button>
+                        </td>
+                      </tr>
+
+                      {/* 子フィールド行（配列の場合、展開されている時のみ表示） */}
+                      {field.type === 'array' && field.children && expandedFields.has(field.name) && (
+                        field.children.map((child) => (
+                          <tr key={`${field.name}.${child.name}`} className="bg-gray-50">
+                            <td className="py-3 pl-12 pr-3 text-sm text-gray-700 sm:pl-8">
+                              <span className="flex items-center gap-2">
+                                <span className="text-gray-400">└</span>
+                                {child.name}
+                              </span>
+                            </td>
+                            <td className="px-3 py-3 text-sm text-gray-500">
+                              <span className="inline-flex items-center rounded-full px-2 py-1 text-xs font-medium bg-blue-100 text-blue-800">
+                                子フィールド
+                              </span>
+                            </td>
+                            <td className="px-3 py-3 text-sm text-gray-500">{child.instruction}</td>
+                            <td className="relative py-3 pl-3 pr-4 text-right text-sm font-medium sm:pr-0">
+                              {/* 子フィールドは個別削除不可（親ごと削除） */}
+                            </td>
+                          </tr>
+                        ))
                       )}
-                    </tr>
+                    </React.Fragment>
                   ))}
                   {formData.extraction_fields.length === 0 && (
                     <tr>
-                      <td colSpan={3} className="px-3 py-4 text-center text-sm text-gray-500">
+                      <td colSpan={4} className="px-3 py-4 text-center text-sm text-gray-500">
                         追加されたフィールドはありません
                       </td>
                     </tr>
