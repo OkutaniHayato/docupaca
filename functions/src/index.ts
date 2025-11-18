@@ -44,6 +44,55 @@ const db = admin.firestore();
 const storage = admin.storage();
 
 /**
+ * 指数バックオフ付きのリトライ処理
+ * @param fn 実行する非同期関数
+ * @param maxRetries 最大リトライ回数（デフォルト: 4回）
+ * @param initialDelayMs 初回リトライの待機時間（デフォルト: 2000ms）
+ * @returns 関数の実行結果
+ */
+async function retryWithExponentialBackoff<T>(
+  fn: () => Promise<T>,
+  maxRetries = 4,
+  initialDelayMs = 2000
+): Promise<T> {
+  let lastError: Error | undefined;
+
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      return await fn();
+    } catch (error) {
+      lastError = error as Error;
+
+      // リトライ対象のエラーかチェック
+      const isRetryableError =
+        (error as { status?: number }).status === 503 || // Service Unavailable
+        (error as { status?: number }).status === 429 || // Too Many Requests
+        (error as { status?: number }).status === 500 || // Internal Server Error
+        (error as Error).message?.includes('overloaded') ||
+        (error as Error).message?.includes('ECONNRESET') ||
+        (error as Error).message?.includes('ETIMEDOUT');
+
+      // 最後の試行、またはリトライ対象外のエラーの場合は例外を投げる
+      if (attempt >= maxRetries || !isRetryableError) {
+        throw error;
+      }
+
+      // 指数バックオフで待機
+      const delayMs = initialDelayMs * Math.pow(2, attempt);
+      functions.logger.warn(
+        `Gemini API request failed (attempt ${attempt + 1}/${maxRetries + 1}). ` +
+        `Retrying in ${delayMs}ms... Error: ${(error as Error).message}`
+      );
+
+      await new Promise(resolve => setTimeout(resolve, delayMs));
+    }
+  }
+
+  // ここには到達しないはずだが、型安全のために
+  throw lastError || new Error('Retry failed');
+}
+
+/**
  * PDFファイルを画像（PNG）に変換する関数
  * @param pdfBuffer PDFファイルのBuffer
  * @returns PNG画像のBuffer
@@ -391,9 +440,12 @@ ${jsonSchemaExample}
         },
       };
 
-      const result = await model.generateContent([imagePart, prompt]);
-      const response = await result.response;
-      const text = response.text();
+      // リトライ処理付きでGemini APIを呼び出し
+      const text = await retryWithExponentialBackoff(async () => {
+        const result = await model.generateContent([imagePart, prompt]);
+        const response = await result.response;
+        return response.text();
+      });
 
       functions.logger.info('Gemini API応答受信');
 
@@ -445,9 +497,21 @@ ${jsonSchemaExample}
         throw error;
       }
 
+      // ユーザーフレンドリーなエラーメッセージを生成
+      let userMessage = 'OCR処理中にエラーが発生しました。';
+      const errorMessage = error instanceof Error ? error.message : String(error);
+
+      if (errorMessage.includes('overloaded') || errorMessage.includes('503')) {
+        userMessage = 'AI APIが混雑しています。自動リトライを行いましたが、処理を完了できませんでした。しばらく時間をおいて再度お試しください。';
+      } else if (errorMessage.includes('429') || errorMessage.includes('quota')) {
+        userMessage = 'APIの利用上限に達しました。しばらく時間をおいて再度お試しください。';
+      } else if (errorMessage.includes('500')) {
+        userMessage = 'AI APIでエラーが発生しました。自動リトライを行いましたが、処理を完了できませんでした。しばらく時間をおいて再度お試しください。';
+      }
+
       throw new functions.https.HttpsError(
         'internal',
-        `OCR処理中にエラーが発生しました: ${error instanceof Error ? error.message : String(error)}`
+        `${userMessage} (詳細: ${errorMessage})`
       );
     }
   }
@@ -667,9 +731,12 @@ ${jsonSchemaExample}
         },
       };
 
-      const result = await model.generateContent([imagePart, prompt]);
-      const response = await result.response;
-      const text = response.text();
+      // リトライ処理付きでGemini APIを呼び出し
+      const text = await retryWithExponentialBackoff(async () => {
+        const result = await model.generateContent([imagePart, prompt]);
+        const response = await result.response;
+        return response.text();
+      });
 
       functions.logger.info('Gemini API response received');
 
@@ -715,9 +782,23 @@ ${jsonSchemaExample}
 
     } catch (error) {
       functions.logger.error('OCR API error:', error);
+
+      // ユーザーフレンドリーなエラーメッセージを生成
+      let userMessage = 'OCR processing failed';
+      const errorMessage = error instanceof Error ? error.message : 'Internal server error';
+
+      if (errorMessage.includes('overloaded') || errorMessage.includes('503')) {
+        userMessage = 'AI API is overloaded. Automatic retry was performed but could not complete the process. Please try again later.';
+      } else if (errorMessage.includes('429') || errorMessage.includes('quota')) {
+        userMessage = 'API rate limit exceeded. Please try again later.';
+      } else if (errorMessage.includes('500')) {
+        userMessage = 'AI API error occurred. Automatic retry was performed but could not complete the process. Please try again later.';
+      }
+
       res.status(500).json({
         success: false,
-        error: error instanceof Error ? error.message : 'Internal server error',
+        error: userMessage,
+        details: errorMessage,
       });
     }
   }
