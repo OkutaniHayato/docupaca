@@ -2,11 +2,12 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { useParams } from 'next/navigation';
+import Link from 'next/link';
 import Image from 'next/image';
 import { TransformWrapper, TransformComponent } from 'react-zoom-pan-pinch';
 import { useAuth } from '@/context/AuthContext';
 import { db, storage } from '@/config/firebase';
-import { doc, getDoc, updateDoc } from 'firebase/firestore';
+import { doc, getDoc } from 'firebase/firestore';
 import { ref, getDownloadURL } from 'firebase/storage'; 
 
 // 
@@ -47,9 +48,6 @@ export default function HistoryDetailPage() {
   const [imageDimensions, setImageDimensions] = useState<{ width: number; height: number } | null>(null);
   const [displayedImageSize, setDisplayedImageSize] = useState<{ width: number; height: number } | null>(null);
   const [isSettingOpen, setIsSettingOpen] = useState(false);
-  const [isEditingSettings, setIsEditingSettings] = useState(false);
-  const [editedSettings, setEditedSettings] = useState<OcrSetting | null>(null);
-  const [isSaving, setIsSaving] = useState(false);
   const imageRef = useRef<HTMLImageElement>(null);
   const params = useParams();
   const { currentUser } = useAuth();
@@ -189,68 +187,6 @@ export default function HistoryDetailPage() {
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
-  };
-
-  const handleEditSettings = () => {
-    if (history?.setting) {
-      setEditedSettings({ ...history.setting });
-      setIsEditingSettings(true);
-    }
-  };
-
-  const handleCancelEdit = () => {
-    setIsEditingSettings(false);
-    setEditedSettings(null);
-  };
-
-  const handleSaveSettings = async () => {
-    if (!editedSettings || !history?.setting_id) return;
-
-    setIsSaving(true);
-    try {
-      const settingRef = doc(db, "ocr_settings", history.setting_id);
-      await updateDoc(settingRef, {
-        name: editedSettings.name,
-        fields: editedSettings.fields,
-        prompt: editedSettings.prompt,
-      });
-
-      // 更新後、historyを更新
-      setHistory({
-        ...history,
-        setting: editedSettings,
-      });
-
-      setIsEditingSettings(false);
-      setEditedSettings(null);
-      alert('OCR設定を更新しました');
-    } catch (error) {
-      console.error('Error updating settings:', error);
-      alert('設定の更新に失敗しました');
-    } finally {
-      setIsSaving(false);
-    }
-  };
-
-  const handleFieldChange = (index: number, key: 'name' | 'description', value: string) => {
-    if (!editedSettings) return;
-    const newFields = [...editedSettings.fields];
-    newFields[index] = { ...newFields[index], [key]: value };
-    setEditedSettings({ ...editedSettings, fields: newFields });
-  };
-
-  const handleAddField = () => {
-    if (!editedSettings) return;
-    setEditedSettings({
-      ...editedSettings,
-      fields: [...editedSettings.fields, { name: '', description: '' }],
-    });
-  };
-
-  const handleRemoveField = (index: number) => {
-    if (!editedSettings) return;
-    const newFields = editedSettings.fields.filter((_, i) => i !== index);
-    setEditedSettings({ ...editedSettings, fields: newFields });
   };
 
   if (isLoading) {
@@ -555,15 +491,15 @@ export default function HistoryDetailPage() {
                 </svg>
               </button>
 
-              {isSettingOpen && !isEditingSettings && (
+              {isSettingOpen && (
                 <div className="mt-2 rounded-lg border border-gray-200 bg-white shadow-sm p-4">
                   <div className="flex justify-end mb-4">
-                    <button
-                      onClick={handleEditSettings}
-                      className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm font-medium"
+                    <Link
+                      href={`/dashboard/settings/edit/${history.setting_id}`}
+                      className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm font-medium inline-block"
                     >
-                      編集
-                    </button>
+                      設定を編集
+                    </Link>
                   </div>
 
                   <div className="mb-4">
@@ -593,87 +529,6 @@ export default function HistoryDetailPage() {
                       </div>
                     </div>
                   )}
-                </div>
-              )}
-
-              {isSettingOpen && isEditingSettings && editedSettings && (
-                <div className="mt-2 rounded-lg border border-gray-200 bg-white shadow-sm p-4">
-                  <div className="flex justify-end gap-2 mb-4">
-                    <button
-                      onClick={handleCancelEdit}
-                      className="px-4 py-2 bg-gray-200 text-gray-800 rounded-lg hover:bg-gray-300 transition-colors text-sm font-medium"
-                    >
-                      キャンセル
-                    </button>
-                    <button
-                      onClick={handleSaveSettings}
-                      disabled={isSaving}
-                      className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors text-sm font-medium disabled:opacity-50"
-                    >
-                      {isSaving ? '保存中...' : '保存'}
-                    </button>
-                  </div>
-
-                  <div className="mb-4">
-                    <h4 className="text-sm font-semibold text-gray-700 mb-2">設定名</h4>
-                    <input
-                      type="text"
-                      value={editedSettings.name}
-                      onChange={(e) => setEditedSettings({ ...editedSettings, name: e.target.value })}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    />
-                  </div>
-
-                  <div className="mb-4">
-                    <div className="flex justify-between items-center mb-2">
-                      <h4 className="text-sm font-semibold text-gray-700">抽出項目</h4>
-                      <button
-                        onClick={handleAddField}
-                        className="px-3 py-1 bg-blue-600 text-white rounded text-sm hover:bg-blue-700"
-                      >
-                        + 項目を追加
-                      </button>
-                    </div>
-                    <div className="space-y-3">
-                      {editedSettings.fields.map((field, index) => (
-                        <div key={index} className="bg-gray-50 rounded p-3 space-y-2">
-                          <div className="flex gap-2">
-                            <input
-                              type="text"
-                              placeholder="項目名"
-                              value={field.name}
-                              onChange={(e) => handleFieldChange(index, 'name', e.target.value)}
-                              className="flex-1 px-3 py-2 border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
-                            />
-                            <button
-                              onClick={() => handleRemoveField(index)}
-                              className="px-3 py-2 bg-red-600 text-white rounded hover:bg-red-700"
-                              title="削除"
-                            >
-                              削除
-                            </button>
-                          </div>
-                          <input
-                            type="text"
-                            placeholder="説明"
-                            value={field.description}
-                            onChange={(e) => handleFieldChange(index, 'description', e.target.value)}
-                            className="w-full px-3 py-2 border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
-                          />
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-
-                  <div>
-                    <h4 className="text-sm font-semibold text-gray-700 mb-2">プロンプト</h4>
-                    <textarea
-                      value={editedSettings.prompt || ''}
-                      onChange={(e) => setEditedSettings({ ...editedSettings, prompt: e.target.value })}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono text-sm"
-                      rows={6}
-                    />
-                  </div>
                 </div>
               )}
             </div>
