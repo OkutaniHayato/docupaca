@@ -46,6 +46,7 @@ export default function HistoryDetailPage() {
   const [imageDimensions, setImageDimensions] = useState<{ width: number; height: number } | null>(null);
   const [expandedArrays, setExpandedArrays] = useState<Set<string>>(new Set());
   const [selectedField, setSelectedField] = useState<string | null>(null);
+  const [initialExpansionDone, setInitialExpansionDone] = useState(false);
   const imageRef = useRef<HTMLImageElement>(null);
   const params = useParams();
   const { currentUser } = useAuth();
@@ -189,6 +190,24 @@ export default function HistoryDetailPage() {
 
     fetchHistoryDetail();
   }, [historyId, currentUser]);
+
+  // 配列フィールドをデフォルトで展開
+  useEffect(() => {
+    if (history && !initialExpansionDone && history.extracted_data) {
+      const arrayFields = new Set<string>();
+
+      Object.entries(history.extracted_data).forEach(([key, value]) => {
+        if (isExtractedArrayData(value)) {
+          arrayFields.add(key);
+        }
+      });
+
+      if (arrayFields.size > 0) {
+        setExpandedArrays(arrayFields);
+        setInitialExpansionDone(true);
+      }
+    }
+  }, [history, initialExpansionDone]);
 
   // すべてのbboxを収集する関数（ネスト構造対応）
   const collectAllBboxes = (data: ExtractedData): Array<{
@@ -622,7 +641,7 @@ export default function HistoryDetailPage() {
                               </span>
                             </td>
                             <td className="p-3 text-sm text-gray-500 italic">
-                              クリックで展開
+                              {isExpanded ? '展開中' : 'クリックで展開'}
                             </td>
                           </tr>
 
