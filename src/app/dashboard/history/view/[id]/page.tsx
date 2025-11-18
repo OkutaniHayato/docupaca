@@ -318,7 +318,7 @@ export default function HistoryDetailPage() {
                         />
 
                         {/* --- ハイライトボックス（BBox） --- */}
-                        {displayedImageSize && imageDimensions && Object.keys(history.extracted_data).map(key => {
+                        {imageDimensions && Object.keys(history.extracted_data).map(key => {
                           const field = history.extracted_data[key];
 
                           // fieldがオブジェクトで、bboxプロパティがあることを確認
@@ -331,7 +331,7 @@ export default function HistoryDetailPage() {
                           console.log(`Processing ${key}:`, { bbox, value: field.value });
 
                           // bbox座標を取得
-                          const [x1, y1, x2, y2] = bbox;
+                          let [x1, y1, x2, y2] = bbox;
 
                           // bbox座標が有効かチェック（すべてが0の場合はスキップ）
                           if (x1 === 0 && y1 === 0 && x2 === 0 && y2 === 0) {
@@ -342,27 +342,22 @@ export default function HistoryDetailPage() {
                           // bbox座標が正規化されているか確認（0-1の範囲）
                           const isNormalized = x1 <= 1 && y1 <= 1 && x2 <= 1 && y2 <= 1;
 
-                          // 正規化された座標の場合、表示サイズに基づいてピクセル座標に変換
-                          let left, top, width, height;
-
-                          if (isNormalized) {
-                            console.log(`${key}: Using normalized coordinates`);
-                            left = x1 * displayedImageSize.width;
-                            top = y1 * displayedImageSize.height;
-                            width = (x2 - x1) * displayedImageSize.width;
-                            height = (y2 - y1) * displayedImageSize.height;
-                          } else {
-                            // ピクセル座標の場合、画像のスケールを考慮
-                            console.log(`${key}: Using pixel coordinates`);
-                            const scaleX = displayedImageSize.width / imageDimensions.width;
-                            const scaleY = displayedImageSize.height / imageDimensions.height;
-                            left = x1 * scaleX;
-                            top = y1 * scaleY;
-                            width = (x2 - x1) * scaleX;
-                            height = (y2 - y1) * scaleY;
+                          // ピクセル座標の場合は正規化する
+                          if (!isNormalized) {
+                            console.log(`${key}: Converting pixel to normalized coordinates`);
+                            x1 = x1 / imageDimensions.width;
+                            y1 = y1 / imageDimensions.height;
+                            x2 = x2 / imageDimensions.width;
+                            y2 = y2 / imageDimensions.height;
                           }
 
-                          console.log(`${key} position:`, { left, top, width, height });
+                          // パーセンテージで座標を設定（ズームに追従する）
+                          const left = (x1 * 100).toFixed(2);
+                          const top = (y1 * 100).toFixed(2);
+                          const width = ((x2 - x1) * 100).toFixed(2);
+                          const height = ((y2 - y1) * 100).toFixed(2);
+
+                          console.log(`${key} position (percentage):`, { left: `${left}%`, top: `${top}%`, width: `${width}%`, height: `${height}%` });
 
                           return (
                             <div
@@ -370,10 +365,10 @@ export default function HistoryDetailPage() {
                               title={`${key}: ${field.value}`}
                               className="absolute border-2 border-green-600 bg-green-600 bg-opacity-10 opacity-70 hover:opacity-100 transition-opacity"
                               style={{
-                                left: `${left}px`,
-                                top: `${top}px`,
-                                width: `${width}px`,
-                                height: `${height}px`,
+                                left: `${left}%`,
+                                top: `${top}%`,
+                                width: `${width}%`,
+                                height: `${height}%`,
                                 pointerEvents: 'none'
                               }}
                             >
