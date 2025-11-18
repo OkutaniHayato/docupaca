@@ -158,11 +158,6 @@ type ExtractedData = {
   [fieldName: string]: ExtractedValue | ExtractedArrayData;
 };
 
-// 型ガード関数
-function isExtractedArrayData(data: ExtractedValue | ExtractedArrayData): data is ExtractedArrayData {
-  return 'items' in data && Array.isArray(data.items);
-}
-
 // OCR設定のデータ型
 interface OcrSetting {
   name: string;

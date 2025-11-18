@@ -81,7 +81,7 @@ export interface OcrSetting {
   model_name: string;
 
   /** 作成日時 */
-  created_at: any; // Firestore Timestamp
+  created_at: FirebaseFirestore.Timestamp | Date;
 
   /** サンプルファイルパス（Cloud Storage） */
   sample_file_path?: string;
@@ -110,7 +110,7 @@ export interface OcrHistory {
   error_message?: string;
 
   /** 実行日時 */
-  executed_at: any; // Firestore Timestamp
+  executed_at: FirebaseFirestore.Timestamp | Date;
 }
 
 /**

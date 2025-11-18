@@ -3,7 +3,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
-import Image from 'next/image';
 import { TransformWrapper, TransformComponent } from 'react-zoom-pan-pinch';
 import { ChevronDown, ChevronRight } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
@@ -45,7 +44,6 @@ export default function HistoryDetailPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [imageDimensions, setImageDimensions] = useState<{ width: number; height: number } | null>(null);
-  const [displayedImageSize, setDisplayedImageSize] = useState<{ width: number; height: number } | null>(null);
   const [expandedArrays, setExpandedArrays] = useState<Set<string>>(new Set());
   const [selectedField, setSelectedField] = useState<string | null>(null);
   const imageRef = useRef<HTMLImageElement>(null);
@@ -257,7 +255,7 @@ export default function HistoryDetailPage() {
     // 配列フィールドがある場合: 親情報を繰り返し、配列を展開
     if (arrayFields.length > 0) {
       // ヘッダー生成: 単一値フィールド + 配列の子フィールド
-      singleFields.forEach(([key, _]) => headers.push(key));
+      singleFields.forEach(([key]) => headers.push(key));
 
       arrayFields.forEach(([arrayKey, arrayData]) => {
         if (arrayData.items.length > 0) {
@@ -269,18 +267,18 @@ export default function HistoryDetailPage() {
       });
 
       // 行データ生成: 配列の最大長分の行を生成
-      const maxArrayLength = Math.max(...arrayFields.map(([_, data]) => data.items.length), 1);
+      const maxArrayLength = Math.max(...arrayFields.map(([, data]) => data.items.length), 1);
 
       for (let i = 0; i < maxArrayLength; i++) {
         const row: string[] = [];
 
         // 単一値フィールドを追加（全行で同じ値）
-        singleFields.forEach(([_, value]) => {
+        singleFields.forEach(([, value]) => {
           row.push(`"${value.value}"`);
         });
 
         // 配列フィールドの各項目を追加
-        arrayFields.forEach(([_, arrayData]) => {
+        arrayFields.forEach(([, arrayData]) => {
           if (i < arrayData.items.length) {
             const item = arrayData.items[i];
             Object.values(item).forEach((childValue) => {
@@ -300,10 +298,10 @@ export default function HistoryDetailPage() {
       }
     } else {
       // 配列フィールドがない場合: シンプルなフラット構造
-      singleFields.forEach(([key, _]) => headers.push(key));
+      singleFields.forEach(([key]) => headers.push(key));
 
       const row: string[] = [];
-      singleFields.forEach(([_, value]) => {
+      singleFields.forEach(([, value]) => {
         row.push(`"${value.value}"`);
       });
       rows.push(row);
@@ -466,10 +464,6 @@ export default function HistoryDetailPage() {
                             setImageDimensions({
                               width: img.naturalWidth,
                               height: img.naturalHeight,
-                            });
-                            setDisplayedImageSize({
-                              width: img.clientWidth,
-                              height: img.clientHeight,
                             });
                           }}
                         />
