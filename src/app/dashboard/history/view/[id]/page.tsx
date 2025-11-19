@@ -504,22 +504,36 @@ export default function HistoryDetailPage() {
                           // bbox座標を取得
                           let [x1, y1, x2, y2] = bbox;
 
-                          // bbox座標が正規化されているか確認（0-1の範囲）
-                          const isNormalized = x1 <= 1 && y1 <= 1 && x2 <= 1 && y2 <= 1;
+                          // bbox座標のスケールを判定
+                          const maxCoord = Math.max(x1, y1, x2, y2);
 
-                          // ピクセル座標の場合は正規化する
-                          if (!isNormalized) {
-                            x1 = x1 / imageDimensions.width;
-                            y1 = y1 / imageDimensions.height;
-                            x2 = x2 / imageDimensions.width;
-                            y2 = y2 / imageDimensions.height;
+                          let normalizedX1, normalizedY1, normalizedX2, normalizedY2;
+
+                          if (maxCoord <= 1) {
+                            // 0-1の正規化座標
+                            normalizedX1 = x1;
+                            normalizedY1 = y1;
+                            normalizedX2 = x2;
+                            normalizedY2 = y2;
+                          } else if (maxCoord <= 1000) {
+                            // 0-1000スケール（一部のOCR APIで使用）
+                            normalizedX1 = x1 / 1000;
+                            normalizedY1 = y1 / 1000;
+                            normalizedX2 = x2 / 1000;
+                            normalizedY2 = y2 / 1000;
+                          } else {
+                            // ピクセル座標
+                            normalizedX1 = x1 / imageDimensions.width;
+                            normalizedY1 = y1 / imageDimensions.height;
+                            normalizedX2 = x2 / imageDimensions.width;
+                            normalizedY2 = y2 / imageDimensions.height;
                           }
 
                           // パーセンテージで座標を設定（ズームに追従する）
-                          const left = (x1 * 100).toFixed(2);
-                          const top = (y1 * 100).toFixed(2);
-                          const width = ((x2 - x1) * 100).toFixed(2);
-                          const height = ((y2 - y1) * 100).toFixed(2);
+                          const left = (normalizedX1 * 100).toFixed(2);
+                          const top = (normalizedY1 * 100).toFixed(2);
+                          const width = ((normalizedX2 - normalizedX1) * 100).toFixed(2);
+                          const height = ((normalizedY2 - normalizedY1) * 100).toFixed(2);
 
                           const isSelected = selectedField === key;
 
