@@ -294,12 +294,17 @@ export default function HistoryDetailPage() {
       // ヘッダー生成: 単一値フィールド + 配列の子フィールド
       singleFields.forEach(([key]) => headers.push(key));
 
+      // 配列フィールドごとのキーの順序を保持
+      const arrayFieldKeys: Array<[string, string[]]> = [];
+
       arrayFields.forEach(([arrayKey, arrayData]) => {
         // 配列が直接来ている場合とitems構造の場合の両方に対応
         const items = Array.isArray(arrayData) ? arrayData : arrayData.items;
         if (items.length > 0) {
           const firstItem = items[0];
-          Object.keys(firstItem).forEach(childKey => {
+          const childKeys = Object.keys(firstItem);
+          arrayFieldKeys.push([arrayKey, childKeys]);
+          childKeys.forEach(childKey => {
             headers.push(`${arrayKey}.${childKey}`);
           });
         }
@@ -318,21 +323,27 @@ export default function HistoryDetailPage() {
           row.push(`"${value.value}"`);
         });
 
-        // 配列フィールドの各項目を追加
-        arrayFields.forEach(([, arrayData]) => {
+        // 配列フィールドの各項目を追加（ヘッダーと同じ順序で）
+        arrayFields.forEach(([arrayKey, arrayData], arrayIndex) => {
           const items = Array.isArray(arrayData) ? arrayData : arrayData.items;
+          const childKeys = arrayFieldKeys[arrayIndex][1];
+
           if (i < items.length) {
             const item = items[i];
-            Object.values(item).forEach((childValue) => {
-              row.push(`"${childValue.value}"`);
+            // ヘッダーと同じ順序でキーを使って値を取得
+            childKeys.forEach(childKey => {
+              const childValue = item[childKey];
+              if (childValue) {
+                row.push(`"${childValue.value}"`);
+              } else {
+                row.push('""');
+              }
             });
           } else {
             // この配列にこのインデックスの項目がない場合は空文字
-            const firstItem = items[0] || {};
-            const childFieldCount = Object.keys(firstItem).length;
-            for (let j = 0; j < childFieldCount; j++) {
+            childKeys.forEach(() => {
               row.push('""');
-            }
+            });
           }
         });
 
@@ -619,12 +630,6 @@ export default function HistoryDetailPage() {
                 </thead>
                 <tbody>
                   {Object.entries(history.extracted_data).map(([key, fieldData]) => {
-                    // デバッグ: データ構造を確認
-                    console.log(`Field: ${key}`, fieldData);
-                    console.log(`Is ExtractedValue:`, isExtractedValue(fieldData));
-                    console.log(`Is ExtractedArrayData:`, isExtractedArrayData(fieldData));
-                    console.log(`Is Array:`, Array.isArray(fieldData));
-
                     // 配列が直接来ている場合の処理
                     if (Array.isArray(fieldData)) {
                       const isExpanded = expandedArrays.has(key);
