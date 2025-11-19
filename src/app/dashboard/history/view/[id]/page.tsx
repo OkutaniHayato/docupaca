@@ -46,6 +46,7 @@ export default function HistoryDetailPage() {
   const [imageDimensions, setImageDimensions] = useState<{ width: number; height: number } | null>(null);
   const [expandedArrays, setExpandedArrays] = useState<Set<string>>(new Set());
   const [selectedField, setSelectedField] = useState<string | null>(null);
+  const [initialExpansionDone, setInitialExpansionDone] = useState(false);
   const imageRef = useRef<HTMLImageElement>(null);
   const params = useParams();
   const { currentUser } = useAuth();
@@ -82,8 +83,6 @@ export default function HistoryDetailPage() {
         }
 
         const data = historySnap.data();
-        console.log('History data:', data);
-        console.log('Setting ID:', data.setting_id);
 
         // 2. この履歴の setting_id が、現在のユーザーが所有する設定かチェック
         if (!data.setting_id) {
@@ -101,7 +100,6 @@ export default function HistoryDetailPage() {
         }
 
         const settingData = settingSnap.data();
-        console.log('Setting data:', settingData);
 
         // 3. 権限チェック: 設定の owner_id が現在のユーザーと一致するか確認
         if (settingData.owner_id !== currentUser.uid) {
@@ -135,13 +133,8 @@ export default function HistoryDetailPage() {
         // 5. データをセット（extracted_data がない場合は空オブジェクト）
         let extractedData = data.extracted_data || {};
 
-        // デバッグ用：extracted_dataの構造をコンソールに出力
-        console.log('extracted_data (raw):', extractedData);
-        console.log('extracted_data type:', Array.isArray(extractedData) ? 'Array' : 'Object');
-
         // 配列の場合はオブジェクトに変換
         if (Array.isArray(extractedData)) {
-          console.log('Converting array to object...');
           const convertedData: ExtractedData = {};
           extractedData.forEach((item: unknown) => {
             // 各配列要素はオブジェクト（例: {invoiceDate: {value: "...", bbox: [...]}}）
@@ -152,10 +145,7 @@ export default function HistoryDetailPage() {
             }
           });
           extractedData = convertedData;
-          console.log('Converted extracted_data:', extractedData);
         }
-
-        console.log('extracted_data keys:', Object.keys(extractedData));
 
         const historyDetail: HistoryDetail = {
           id: historySnap.id,
@@ -174,9 +164,6 @@ export default function HistoryDetailPage() {
           },
         };
 
-        console.log('Final history detail:', historyDetail);
-        console.log('Setting info:', historyDetail.setting);
-
         setHistory(historyDetail);
 
       } catch (err) {
@@ -189,6 +176,25 @@ export default function HistoryDetailPage() {
 
     fetchHistoryDetail();
   }, [historyId, currentUser]);
+
+  // 配列フィールドをデフォルトで展開
+  useEffect(() => {
+    if (history && !initialExpansionDone && history.extracted_data) {
+      const arrayFields = new Set<string>();
+
+      Object.entries(history.extracted_data).forEach(([key, value]) => {
+        // 配列が直接来ている場合もチェック
+        if (Array.isArray(value) || isExtractedArrayData(value)) {
+          arrayFields.add(key);
+        }
+      });
+
+      if (arrayFields.size > 0) {
+        setExpandedArrays(arrayFields);
+        setInitialExpansionDone(true);
+      }
+    }
+  }, [history, initialExpansionDone]);
 
   // すべてのbboxを収集する関数（ネスト構造対応）
   const collectAllBboxes = (data: ExtractedData): Array<{
@@ -212,8 +218,22 @@ export default function HistoryDetailPage() {
             bbox: fieldData.bbox,
           });
         }
+      } else if (Array.isArray(fieldData)) {
+        // 配列が直接来ている場合
+        const arrayData = fieldData as Array<{[childFieldName: string]: ExtractedValue}>;
+        arrayData.forEach((item, index) => {
+          Object.entries(item).forEach(([childKey, childValue]) => {
+            if (childValue.bbox && !(childValue.bbox[0] === 0 && childValue.bbox[1] === 0 && childValue.bbox[2] === 0 && childValue.bbox[3] === 0)) {
+              bboxes.push({
+                key: `${fieldName}[${index}].${childKey}`,
+                value: childValue.value,
+                bbox: childValue.bbox,
+              });
+            }
+          });
+        });
       } else if (isExtractedArrayData(fieldData)) {
-        // 配列フィールド
+        // 配列フィールド（items構造の場合）
         fieldData.items.forEach((item, index) => {
           Object.entries(item).forEach(([childKey, childValue]) => {
             if (childValue.bbox && !(childValue.bbox[0] === 0 && childValue.bbox[1] === 0 && childValue.bbox[2] === 0 && childValue.bbox[3] === 0)) {
@@ -242,10 +262,13 @@ export default function HistoryDetailPage() {
 
     // 単一値フィールドと配列フィールドを分離
     const singleFields: Array<[string, ExtractedValue]> = [];
-    const arrayFields: Array<[string, ExtractedArrayData]> = [];
+    const arrayFields: Array<[string, Array<{[childFieldName: string]: ExtractedValue}> | ExtractedArrayData]> = [];
 
     Object.entries(data).forEach(([key, value]) => {
-      if (isExtractedArrayData(value)) {
+      if (Array.isArray(value)) {
+        // 配列が直接来ている場合
+        arrayFields.push([key, value as Array<{[childFieldName: string]: ExtractedValue}>]);
+      } else if (isExtractedArrayData(value)) {
         arrayFields.push([key, value]);
       } else if (isExtractedValue(value)) {
         singleFields.push([key, value]);
@@ -257,17 +280,26 @@ export default function HistoryDetailPage() {
       // ヘッダー生成: 単一値フィールド + 配列の子フィールド
       singleFields.forEach(([key]) => headers.push(key));
 
+      // 配列フィールドごとのキーの順序を保持
+      const arrayFieldKeys: Array<[string, string[]]> = [];
+
       arrayFields.forEach(([arrayKey, arrayData]) => {
-        if (arrayData.items.length > 0) {
-          const firstItem = arrayData.items[0];
-          Object.keys(firstItem).forEach(childKey => {
+        // 配列が直接来ている場合とitems構造の場合の両方に対応
+        const items = Array.isArray(arrayData) ? arrayData : arrayData.items;
+        if (items.length > 0) {
+          const firstItem = items[0];
+          const childKeys = Object.keys(firstItem);
+          arrayFieldKeys.push([arrayKey, childKeys]);
+          childKeys.forEach(childKey => {
             headers.push(`${arrayKey}.${childKey}`);
           });
         }
       });
 
       // 行データ生成: 配列の最大長分の行を生成
-      const maxArrayLength = Math.max(...arrayFields.map(([, data]) => data.items.length), 1);
+      const maxArrayLength = Math.max(...arrayFields.map(([, data]) => {
+        return Array.isArray(data) ? data.length : data.items.length;
+      }), 1);
 
       for (let i = 0; i < maxArrayLength; i++) {
         const row: string[] = [];
@@ -277,20 +309,27 @@ export default function HistoryDetailPage() {
           row.push(`"${value.value}"`);
         });
 
-        // 配列フィールドの各項目を追加
-        arrayFields.forEach(([, arrayData]) => {
-          if (i < arrayData.items.length) {
-            const item = arrayData.items[i];
-            Object.values(item).forEach((childValue) => {
-              row.push(`"${childValue.value}"`);
+        // 配列フィールドの各項目を追加（ヘッダーと同じ順序で）
+        arrayFields.forEach(([arrayKey, arrayData], arrayIndex) => {
+          const items = Array.isArray(arrayData) ? arrayData : arrayData.items;
+          const childKeys = arrayFieldKeys[arrayIndex][1];
+
+          if (i < items.length) {
+            const item = items[i];
+            // ヘッダーと同じ順序でキーを使って値を取得
+            childKeys.forEach(childKey => {
+              const childValue = item[childKey];
+              if (childValue) {
+                row.push(`"${childValue.value}"`);
+              } else {
+                row.push('""');
+              }
             });
           } else {
             // この配列にこのインデックスの項目がない場合は空文字
-            const firstItem = arrayData.items[0] || {};
-            const childFieldCount = Object.keys(firstItem).length;
-            for (let j = 0; j < childFieldCount; j++) {
+            childKeys.forEach(() => {
               row.push('""');
-            }
+            });
           }
         });
 
@@ -453,14 +492,6 @@ export default function HistoryDetailPage() {
                           className="max-h-[calc(100vh-250px)] w-auto h-auto"
                           onLoad={(e) => {
                             const img = e.target as HTMLImageElement;
-                            console.log('Image loaded:', {
-                              naturalWidth: img.naturalWidth,
-                              naturalHeight: img.naturalHeight,
-                              displayWidth: img.width,
-                              displayHeight: img.height,
-                              clientWidth: img.clientWidth,
-                              clientHeight: img.clientHeight
-                            });
                             setImageDimensions({
                               width: img.naturalWidth,
                               height: img.naturalHeight,
@@ -577,6 +608,79 @@ export default function HistoryDetailPage() {
                 </thead>
                 <tbody>
                   {Object.entries(history.extracted_data).map(([key, fieldData]) => {
+                    // 配列が直接来ている場合の処理
+                    if (Array.isArray(fieldData)) {
+                      const isExpanded = expandedArrays.has(key);
+                      const arrayData = fieldData as Array<{[childFieldName: string]: ExtractedValue}>;
+
+                      return (
+                        <React.Fragment key={key}>
+                          {/* 親行 */}
+                          <tr className="border-b bg-green-50 hover:bg-green-100 cursor-pointer">
+                            <td className="p-3 text-sm font-medium text-gray-800">
+                              <div className="flex items-center gap-2" onClick={() => toggleArrayExpansion(key)}>
+                                {isExpanded ? (
+                                  <ChevronDown className="h-4 w-4 text-gray-600" />
+                                ) : (
+                                  <ChevronRight className="h-4 w-4 text-gray-600" />
+                                )}
+                                <span>{key}</span>
+                              </div>
+                            </td>
+                            <td className="p-3 text-sm text-gray-500">
+                              <span className="inline-flex items-center rounded-full px-2 py-1 text-xs font-medium bg-green-100 text-green-800">
+                                配列 ({arrayData.length}件)
+                              </span>
+                            </td>
+                            <td className="p-3 text-sm text-gray-500 italic">
+                              {isExpanded ? '展開中' : 'クリックで展開'}
+                            </td>
+                          </tr>
+
+                          {/* 子行（展開時） */}
+                          {isExpanded && arrayData.map((item, index) => (
+                            <React.Fragment key={`${key}-${index}`}>
+                              {/* 配列項目のヘッダー行 */}
+                              <tr className="border-b bg-gray-100">
+                                <td colSpan={3} className="p-2 pl-8 text-xs font-semibold text-gray-700">
+                                  {key}[{index}]
+                                </td>
+                              </tr>
+
+                              {/* 配列項目の子フィールド */}
+                              {Object.entries(item).map(([childKey, childValue]) => {
+                                const fullKey = `${key}[${index}].${childKey}`;
+                                return (
+                                  <tr
+                                    key={fullKey}
+                                    className={`border-b hover:bg-blue-50 cursor-pointer transition-colors ${
+                                      selectedField === fullKey ? 'bg-blue-100' : 'bg-gray-50'
+                                    }`}
+                                    onClick={() => setSelectedField(fullKey)}
+                                  >
+                                    <td className="p-3 pl-12 text-sm text-gray-700">
+                                      <span className="flex items-center gap-2">
+                                        <span className="text-gray-400">└</span>
+                                        {childKey}
+                                      </span>
+                                    </td>
+                                    <td className="p-3 text-sm text-gray-500">
+                                      <span className="inline-flex items-center rounded-full px-2 py-1 text-xs font-medium bg-blue-100 text-blue-800">
+                                        子フィールド
+                                      </span>
+                                    </td>
+                                    <td className="p-3 text-sm text-gray-600 font-mono">
+                                      {childValue.value}
+                                    </td>
+                                  </tr>
+                                );
+                              })}
+                            </React.Fragment>
+                          ))}
+                        </React.Fragment>
+                      );
+                    }
+
                     if (isExtractedValue(fieldData)) {
                       // 単一値フィールド
                       return (
@@ -622,7 +726,7 @@ export default function HistoryDetailPage() {
                               </span>
                             </td>
                             <td className="p-3 text-sm text-gray-500 italic">
-                              クリックで展開
+                              {isExpanded ? '展開中' : 'クリックで展開'}
                             </td>
                           </tr>
 
@@ -678,13 +782,6 @@ export default function HistoryDetailPage() {
           </div>
 
           {/* --- OCR設定情報 --- */}
-          {(() => {
-            console.log('Rendering OCR settings section');
-            console.log('history:', history);
-            console.log('history.setting:', history?.setting);
-            console.log('history.setting_id:', history?.setting_id);
-            return null;
-          })()}
           {history.setting && (
             <div className="mt-6">
               <div className="rounded-lg border border-gray-200 bg-white shadow-sm p-4">
