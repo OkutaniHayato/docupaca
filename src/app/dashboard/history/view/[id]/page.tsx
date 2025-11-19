@@ -596,6 +596,11 @@ export default function HistoryDetailPage() {
                 </thead>
                 <tbody>
                   {Object.entries(history.extracted_data).map(([key, fieldData]) => {
+                    // デバッグ: データ構造を確認
+                    console.log(`Field: ${key}`, fieldData);
+                    console.log(`Is ExtractedValue:`, isExtractedValue(fieldData));
+                    console.log(`Is ExtractedArrayData:`, isExtractedArrayData(fieldData));
+
                     if (isExtractedValue(fieldData)) {
                       // 単一値フィールド
                       return (
