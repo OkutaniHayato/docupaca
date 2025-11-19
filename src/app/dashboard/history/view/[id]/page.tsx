@@ -83,8 +83,6 @@ export default function HistoryDetailPage() {
         }
 
         const data = historySnap.data();
-        console.log('History data:', data);
-        console.log('Setting ID:', data.setting_id);
 
         // 2. この履歴の setting_id が、現在のユーザーが所有する設定かチェック
         if (!data.setting_id) {
@@ -102,7 +100,6 @@ export default function HistoryDetailPage() {
         }
 
         const settingData = settingSnap.data();
-        console.log('Setting data:', settingData);
 
         // 3. 権限チェック: 設定の owner_id が現在のユーザーと一致するか確認
         if (settingData.owner_id !== currentUser.uid) {
@@ -136,13 +133,8 @@ export default function HistoryDetailPage() {
         // 5. データをセット（extracted_data がない場合は空オブジェクト）
         let extractedData = data.extracted_data || {};
 
-        // デバッグ用：extracted_dataの構造をコンソールに出力
-        console.log('extracted_data (raw):', extractedData);
-        console.log('extracted_data type:', Array.isArray(extractedData) ? 'Array' : 'Object');
-
         // 配列の場合はオブジェクトに変換
         if (Array.isArray(extractedData)) {
-          console.log('Converting array to object...');
           const convertedData: ExtractedData = {};
           extractedData.forEach((item: unknown) => {
             // 各配列要素はオブジェクト（例: {invoiceDate: {value: "...", bbox: [...]}}）
@@ -153,10 +145,7 @@ export default function HistoryDetailPage() {
             }
           });
           extractedData = convertedData;
-          console.log('Converted extracted_data:', extractedData);
         }
-
-        console.log('extracted_data keys:', Object.keys(extractedData));
 
         const historyDetail: HistoryDetail = {
           id: historySnap.id,
@@ -174,9 +163,6 @@ export default function HistoryDetailPage() {
             model: settingData.model_name,
           },
         };
-
-        console.log('Final history detail:', historyDetail);
-        console.log('Setting info:', historyDetail.setting);
 
         setHistory(historyDetail);
 
@@ -506,14 +492,6 @@ export default function HistoryDetailPage() {
                           className="max-h-[calc(100vh-250px)] w-auto h-auto"
                           onLoad={(e) => {
                             const img = e.target as HTMLImageElement;
-                            console.log('Image loaded:', {
-                              naturalWidth: img.naturalWidth,
-                              naturalHeight: img.naturalHeight,
-                              displayWidth: img.width,
-                              displayHeight: img.height,
-                              clientWidth: img.clientWidth,
-                              clientHeight: img.clientHeight
-                            });
                             setImageDimensions({
                               width: img.naturalWidth,
                               height: img.naturalHeight,
@@ -804,13 +782,6 @@ export default function HistoryDetailPage() {
           </div>
 
           {/* --- OCR設定情報 --- */}
-          {(() => {
-            console.log('Rendering OCR settings section');
-            console.log('history:', history);
-            console.log('history.setting:', history?.setting);
-            console.log('history.setting_id:', history?.setting_id);
-            return null;
-          })()}
           {history.setting && (
             <div className="mt-6">
               <div className="rounded-lg border border-gray-200 bg-white shadow-sm p-4">
