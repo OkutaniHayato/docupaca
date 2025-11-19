@@ -500,70 +500,77 @@ export default function HistoryDetailPage() {
                         />
 
                         {/* --- ハイライトボックス（BBox） - ネスト構造対応 --- */}
-                        {imageDimensions && collectAllBboxes(history.extracted_data).map(({ key, value, bbox }) => {
-                          // bbox座標を取得
-                          let [x1, y1, x2, y2] = bbox;
+                        {imageDimensions && (() => {
+                          const allBboxes = collectAllBboxes(history.extracted_data);
 
-                          // bbox座標のスケールを判定
-                          const maxCoord = Math.max(x1, y1, x2, y2);
-
-                          let normalizedX1, normalizedY1, normalizedX2, normalizedY2;
-
-                          if (maxCoord <= 1) {
-                            // 0-1の正規化座標
-                            normalizedX1 = x1;
-                            normalizedY1 = y1;
-                            normalizedX2 = x2;
-                            normalizedY2 = y2;
-                          } else if (maxCoord <= 1000) {
-                            // 0-1000スケール（一部のOCR APIで使用）
-                            normalizedX1 = x1 / 1000;
-                            normalizedY1 = y1 / 1000;
-                            normalizedX2 = x2 / 1000;
-                            normalizedY2 = y2 / 1000;
-                          } else {
-                            // ピクセル座標
-                            normalizedX1 = x1 / imageDimensions.width;
-                            normalizedY1 = y1 / imageDimensions.height;
-                            normalizedX2 = x2 / imageDimensions.width;
-                            normalizedY2 = y2 / imageDimensions.height;
-                          }
-
-                          // パーセンテージで座標を設定（ズームに追従する）
-                          const left = (normalizedX1 * 100).toFixed(2);
-                          const top = (normalizedY1 * 100).toFixed(2);
-                          const width = ((normalizedX2 - normalizedX1) * 100).toFixed(2);
-                          const height = ((normalizedY2 - normalizedY1) * 100).toFixed(2);
-
-                          const isSelected = selectedField === key;
-
-                          return (
-                            <div
-                              key={key}
-                              title={`${key}: ${value}`}
-                              className={`absolute border-2 transition-all ${
-                                isSelected
-                                  ? 'border-blue-600 bg-blue-600 bg-opacity-30 opacity-100 z-10'
-                                  : 'border-green-600 bg-green-600 bg-opacity-10 opacity-70 hover:opacity-100'
-                              }`}
-                              style={{
-                                left: `${left}%`,
-                                top: `${top}%`,
-                                width: `${width}%`,
-                                height: `${height}%`,
-                                pointerEvents: 'none'
-                              }}
-                            >
-                              <span className={`absolute -top-5 left-0 text-xs px-1 rounded whitespace-nowrap ${
-                                isSelected
-                                  ? 'bg-blue-600 text-white'
-                                  : 'bg-green-600 text-white'
-                              }`}>
-                                {key}
-                              </span>
-                            </div>
+                          // 全てのbboxから最大座標値を取得してスケールを判定
+                          const globalMaxCoord = Math.max(
+                            ...allBboxes.flatMap(({ bbox }) => bbox)
                           );
-                        })}
+
+                          return allBboxes.map(({ key, value, bbox }) => {
+                            // bbox座標を取得
+                            const [x1, y1, x2, y2] = bbox;
+
+                            let normalizedX1, normalizedY1, normalizedX2, normalizedY2;
+
+                            // 全bboxの最大値でスケールを統一判定
+                            if (globalMaxCoord <= 1) {
+                              // 0-1の正規化座標
+                              normalizedX1 = x1;
+                              normalizedY1 = y1;
+                              normalizedX2 = x2;
+                              normalizedY2 = y2;
+                            } else if (globalMaxCoord <= 1000) {
+                              // 0-1000スケール（一部のOCR APIで使用）
+                              normalizedX1 = x1 / 1000;
+                              normalizedY1 = y1 / 1000;
+                              normalizedX2 = x2 / 1000;
+                              normalizedY2 = y2 / 1000;
+                            } else {
+                              // ピクセル座標
+                              normalizedX1 = x1 / imageDimensions.width;
+                              normalizedY1 = y1 / imageDimensions.height;
+                              normalizedX2 = x2 / imageDimensions.width;
+                              normalizedY2 = y2 / imageDimensions.height;
+                            }
+
+                            // パーセンテージで座標を設定（ズームに追従する）
+                            const left = (normalizedX1 * 100).toFixed(2);
+                            const top = (normalizedY1 * 100).toFixed(2);
+                            const width = ((normalizedX2 - normalizedX1) * 100).toFixed(2);
+                            const height = ((normalizedY2 - normalizedY1) * 100).toFixed(2);
+
+                            const isSelected = selectedField === key;
+
+                            return (
+                              <div
+                                key={key}
+                                title={`${key}: ${value}`}
+                                className={`absolute border-2 transition-all ${
+                                  isSelected
+                                    ? 'border-blue-600 bg-blue-600 bg-opacity-30 opacity-100 z-10'
+                                    : 'border-green-600 bg-green-600 bg-opacity-10 opacity-70 hover:opacity-100'
+                                }`}
+                                style={{
+                                  left: `${left}%`,
+                                  top: `${top}%`,
+                                  width: `${width}%`,
+                                  height: `${height}%`,
+                                  pointerEvents: 'none'
+                                }}
+                              >
+                                <span className={`absolute -top-5 left-0 text-xs px-1 rounded whitespace-nowrap ${
+                                  isSelected
+                                    ? 'bg-blue-600 text-white'
+                                    : 'bg-green-600 text-white'
+                                }`}>
+                                  {key}
+                                </span>
+                              </div>
+                            );
+                          });
+                        })()}
                       </div>
                     </TransformComponent>
                   </>
