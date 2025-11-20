@@ -3,48 +3,8 @@ import * as admin from 'firebase-admin';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { defineSecret } from 'firebase-functions/params';
 import * as crypto from 'crypto';
-import { createCanvas, ImageData } from '@napi-rs/canvas';
+import { spawn } from 'child_process';
 import sharp from 'sharp';
-
-// ImageDataをグローバルに設定（pdfjs-distがNode.js環境で使用するため）
-// pdfjs-distのimport前に設定する必要があるため、requireを使用
-(globalThis as Record<string, unknown>).ImageData = ImageData;
-(global as Record<string, unknown>).ImageData = ImageData;
-
-// pdfjs-distをポリフィル設定後に読み込む（importはホイスティングされるためrequireを使用）
-// eslint-disable-next-line @typescript-eslint/no-var-requires
-const pdfjsLib = require('pdfjs-dist') as typeof import('pdfjs-dist');
-
-// pdfjs-distのワーカーを無効化（Node.js環境でフェイクワーカーを使用）
-if (typeof pdfjsLib.GlobalWorkerOptions !== 'undefined') {
-  pdfjsLib.GlobalWorkerOptions.workerSrc = '';
-}
-
-// Canvas APIのPolyfill: Path2Dをグローバルにセットアップ
-// @napi-rs/canvasにはPath2Dがないため、pdfjs-dist用に簡易実装を提供
-if (typeof global !== 'undefined' && !global.Path2D) {
-  class Path2DPolyfill {
-    private commands: string[] = [];
-
-    moveTo(x: number, y: number) { this.commands.push(`M${x},${y}`); }
-    lineTo(x: number, y: number) { this.commands.push(`L${x},${y}`); }
-    bezierCurveTo(cp1x: number, cp1y: number, cp2x: number, cp2y: number, x: number, y: number) {
-      this.commands.push(`C${cp1x},${cp1y} ${cp2x},${cp2y} ${x},${y}`);
-    }
-    quadraticCurveTo(cpx: number, cpy: number, x: number, y: number) {
-      this.commands.push(`Q${cpx},${cpy} ${x},${y}`);
-    }
-    arc(x: number, y: number, radius: number, startAngle: number, endAngle: number) {
-      this.commands.push(`A${x},${y},${radius},${startAngle},${endAngle}`);
-    }
-    rect(x: number, y: number, w: number, h: number) {
-      this.commands.push(`M${x},${y}L${x+w},${y}L${x+w},${y+h}L${x},${y+h}Z`);
-    }
-    closePath() { this.commands.push('Z'); }
-  }
-
-  (global as Record<string, unknown>).Path2D = Path2DPolyfill;
-}
 
 // Firebase Admin初期化
 admin.initializeApp();
@@ -106,66 +66,68 @@ async function retryWithExponentialBackoff<T>(
 }
 
 /**
- * PDFファイルを画像（PNG）に変換する関数
- * @param pdfBuffer PDFファイルのBuffer
- * @returns PNG画像のBuffer
+ * PDFを画像に変換する関数（ImageMagick版）
+ * - Cloud Functions ランタイムに入っている ImageMagick の `convert` を利用
+ * - 1ページ目のみ PNG に変換
+ * - 失敗したら null を返し、OCR処理自体は続行
  */
-async function convertPdfToImage(pdfBuffer: Buffer): Promise<Buffer> {
-  try {
-    // pdfjs-distのバージョンに合わせたCDN URL
-    const PDFJS_CDN_BASE = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@4.0.379';
+async function convertPdfToImage(pdfBuffer: Buffer): Promise<Buffer | null> {
+  return new Promise<Buffer | null>((resolve) => {
+    try {
+      const convert = spawn('convert', [
+        '-density',
+        '150',
+        'pdf:-[0]', // 1ページ目だけ
+        '-quality',
+        '90',
+        'png:-',
+      ]);
 
-    // PDFドキュメントをロード
-    // Node.js環境での設定
-    const loadingTask = pdfjsLib.getDocument({
-      data: new Uint8Array(pdfBuffer),
-      // CMap設定（日本語などのマルチバイト文字に必要）
-      cMapUrl: `${PDFJS_CDN_BASE}/cmaps/`,
-      cMapPacked: true,
-      // 標準フォント設定（PDF標準フォントの表示に必要）
-      standardFontDataUrl: `${PDFJS_CDN_BASE}/standard_fonts/`,
-      // Node.js環境向け設定
-      useSystemFonts: true,
-      isEvalSupported: false,  // Node.jsではevalを無効化
-      isOffscreenCanvasSupported: false,  // Node.jsではOffscreenCanvasを無効化
-      disableFontFace: true,  // Node.jsではフォントフェースを無効化
-      useWorkerFetch: false,  // Node.jsではワーカーフェッチを無効化
-      verbosity: 0,  // エラーログを抑制
-    });
+      const chunks: Buffer[] = [];
+      const errors: Buffer[] = [];
 
-    const pdfDocument = await loadingTask.promise;
+      convert.stdout.on('data', (data) => chunks.push(data));
+      convert.stderr.on('data', (data) => errors.push(data));
 
-    // 最初のページを取得
-    const page = await pdfDocument.getPage(1);
+      convert.on('error', (err) => {
+        functions.logger.error('ImageMagick spawn error:', err);
+        resolve(null);
+      });
 
-    // ビューポートを設定（スケール2で高解像度）
-    const viewport = page.getViewport({ scale: 2.0 });
+      convert.on('close', async (code) => {
+        if (code !== 0 || chunks.length === 0) {
+          functions.logger.error('ImageMagick convert failed', {
+            code,
+            stderr: Buffer.concat(errors).toString(),
+          });
+          resolve(null);
+          return;
+        }
 
-    // Canvasを作成
-    const canvas = createCanvas(viewport.width, viewport.height);
-    const context = canvas.getContext('2d');
+        const pngBuffer = Buffer.concat(chunks);
 
-    // ページをCanvasにレンダリング
-    const renderContext = {
-      canvasContext: context as unknown as CanvasRenderingContext2D,
-      viewport: viewport,
-    };
+        // sharp で最適化（任意）
+        try {
+          const optimized = await sharp(pngBuffer)
+            .png({ quality: 80, compressionLevel: 9 })
+            .toBuffer();
+          resolve(optimized);
+        } catch (e) {
+          functions.logger.error('sharp optimization failed:', e);
+          resolve(pngBuffer);
+        }
+      });
 
-    await page.render(renderContext).promise;
-
-    // CanvasをPNGバッファに変換
-    const pngBuffer = canvas.toBuffer('image/png');
-
-    // sharpで最適化（ファイルサイズを削減）
-    const optimizedBuffer = await sharp(pngBuffer)
-      .png({ quality: 90, compressionLevel: 9 })
-      .toBuffer();
-
-    return optimizedBuffer;
-  } catch (error) {
-    functions.logger.error('PDF to image conversion error:', error);
-    throw new Error(`PDFの画像変換に失敗しました: ${error instanceof Error ? error.message : String(error)}`);
-  }
+      convert.stdin.write(pdfBuffer);
+      convert.stdin.end();
+    } catch (error) {
+      functions.logger.error('PDF to image conversion failed:', {
+        message: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined,
+      });
+      resolve(null);
+    }
+  });
 }
 
 // APIキーのハッシュを検証する関数
@@ -404,27 +366,17 @@ export const executeOcr = functions.https.onCall(
       // PDFの場合は画像に変換してCloud Storageに保存
       let convertedImagePath: string | undefined;
       if (mimeType === 'application/pdf' || file_path.toLowerCase().endsWith('.pdf')) {
-        functions.logger.info('PDFを画像に変換中...');
+        functions.logger.info('Processing PDF for preview...');
 
-        try {
-          // PDFを画像に変換
-          const imageBuffer = await convertPdfToImage(fileBuffer);
+        const imageBuffer = await convertPdfToImage(fileBuffer);
 
-          // 変換した画像をCloud Storageに保存
+        if (imageBuffer) {
           const imagePath = file_path.replace(/\.pdf$/i, '_converted.png');
-          const imageFile = bucket.file(imagePath);
-
-          await imageFile.save(imageBuffer, {
-            metadata: {
-              contentType: 'image/png',
-            },
-          });
-
+          await bucket.file(imagePath).save(imageBuffer, { metadata: { contentType: 'image/png' } });
           convertedImagePath = imagePath;
-          functions.logger.info(`画像変換成功: ${imagePath}`);
-        } catch (conversionError) {
-          functions.logger.warn('PDF to image conversion failed:', conversionError);
-          // 変換に失敗してもOCR処理は続行
+          functions.logger.info(`Preview image saved: ${imagePath}`);
+        } else {
+          functions.logger.warn('Preview generation skipped due to conversion error.');
         }
       }
 
@@ -689,28 +641,15 @@ export const ocrApi = functions.https.onRequest(
 
       // PDFの場合は画像に変換してCloud Storageに保存
       let convertedImagePath: string | undefined;
-      if (mimeType === 'application/pdf' || storagePath.toLowerCase().endsWith('.pdf')) {
-        functions.logger.info('Converting PDF to image...');
-
-        try {
-          // PDFを画像に変換
-          const imageBuffer = await convertPdfToImage(fileBuffer);
-
-          // 変換した画像をCloud Storageに保存
+      if (mimeType === 'application/pdf') {
+        const imageBuffer = await convertPdfToImage(fileBuffer);
+        if (imageBuffer) {
           const imagePath = storagePath.replace(/\.pdf$/i, '_converted.png');
-          const imageFile = bucket.file(imagePath);
-
-          await imageFile.save(imageBuffer, {
-            metadata: {
-              contentType: 'image/png',
-            },
-          });
-
+          await bucket.file(imagePath).save(imageBuffer, { metadata: { contentType: 'image/png' } });
           convertedImagePath = imagePath;
           functions.logger.info(`PDF converted to image: ${imagePath}`);
-        } catch (conversionError) {
-          functions.logger.warn('PDF to image conversion failed:', conversionError);
-          // 変換に失敗してもOCR処理は続行
+        } else {
+          functions.logger.warn('PDF to image conversion failed, continuing with OCR.');
         }
       }
 
