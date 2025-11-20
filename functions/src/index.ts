@@ -7,6 +7,11 @@ import * as pdfjsLib from 'pdfjs-dist';
 import { createCanvas } from '@napi-rs/canvas';
 import sharp from 'sharp';
 
+// pdfjs-distのワーカーを無効化（Node.js環境でフェイクワーカーを使用）
+if (typeof pdfjsLib.GlobalWorkerOptions !== 'undefined') {
+  pdfjsLib.GlobalWorkerOptions.workerSrc = '';
+}
+
 // Canvas APIのPolyfill: Path2Dをグローバルにセットアップ
 // @napi-rs/canvasにはPath2Dがないため、pdfjs-dist用に簡易実装を提供
 if (typeof global !== 'undefined' && !global.Path2D) {
@@ -100,9 +105,15 @@ async function retryWithExponentialBackoff<T>(
 async function convertPdfToImage(pdfBuffer: Buffer): Promise<Buffer> {
   try {
     // PDFドキュメントをロード
+    // Node.js環境での設定
     const loadingTask = pdfjsLib.getDocument({
       data: new Uint8Array(pdfBuffer),
       useSystemFonts: true,
+      isEvalSupported: false,  // Node.jsではevalを無効化
+      isOffscreenCanvasSupported: false,  // Node.jsではOffscreenCanvasを無効化
+      disableFontFace: true,  // Node.jsではフォントフェースを無効化
+      useWorkerFetch: false,  // Node.jsではワーカーフェッチを無効化
+      verbosity: 0,  // エラーログを抑制
     });
 
     const pdfDocument = await loadingTask.promise;

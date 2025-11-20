@@ -24,7 +24,6 @@
   },
   "devDependencies": {
     "@types/node": "^20.0.0",
-    "@types/pdfjs-dist": "^2.10.377",
     "typescript": "^5.0.0"
   },
   "private": true
