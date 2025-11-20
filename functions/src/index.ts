@@ -457,7 +457,6 @@ export const executeOcr = functions.https.onCall(
       functions.logger.info(`ファイル取得成功: size=${fileBuffer.length} bytes, mimeType=${mimeType}`);
 
       // PDFの場合は画像に変換してCloud Storageに保存
-      let convertedImagePath: string | undefined;
       let convertedImagePaths: string[] | undefined;
       let pageCount: number | undefined;
       if (mimeType === 'application/pdf' || file_path.toLowerCase().endsWith('.pdf')) {
@@ -475,11 +474,6 @@ export const executeOcr = functions.https.onCall(
             await bucket.file(pagePath).save(result.buffers[i], { metadata: { contentType: 'image/png' } });
             convertedImagePaths.push(pagePath);
             functions.logger.info(`Preview image saved: ${pagePath}`);
-          }
-
-          // 後方互換性のため1ページ目のパスも保存
-          if (convertedImagePaths.length > 0) {
-            convertedImagePath = convertedImagePaths[0];
           }
         } else {
           functions.logger.warn('Preview generation skipped due to conversion error.');
@@ -552,14 +546,9 @@ ${jsonSchemaExample}
         extracted_data: extractedData,
       };
 
-      // 変換された画像のパスがあれば追加
-      if (convertedImagePath) {
-        updateData.converted_image_path = convertedImagePath;
-      }
+      // 変換された画像のパスがあれば追加（配列形式で保存）
       if (convertedImagePaths && convertedImagePaths.length > 0) {
         updateData.converted_image_paths = convertedImagePaths;
-      }
-      if (pageCount) {
         updateData.page_count = pageCount;
       }
 
@@ -752,7 +741,6 @@ export const ocrApi = functions.https.onRequest(
       functions.logger.info(`File saved to storage: ${storagePath}`);
 
       // PDFの場合は画像に変換してCloud Storageに保存
-      let convertedImagePath: string | undefined;
       let convertedImagePaths: string[] | undefined;
       let pageCount: number | undefined;
       if (mimeType === 'application/pdf') {
@@ -767,11 +755,6 @@ export const ocrApi = functions.https.onRequest(
             await bucket.file(pagePath).save(result.buffers[i], { metadata: { contentType: 'image/png' } });
             convertedImagePaths.push(pagePath);
             functions.logger.info(`PDF converted to image: ${pagePath}`);
-          }
-
-          // 後方互換性のため1ページ目のパスも保存
-          if (convertedImagePaths.length > 0) {
-            convertedImagePath = convertedImagePaths[0];
           }
         } else {
           functions.logger.warn('PDF to image conversion failed, continuing with OCR.');
@@ -856,14 +839,9 @@ ${jsonSchemaExample}
         extracted_data: extractedData,
       };
 
-      // 変換された画像のパスがあれば追加
-      if (convertedImagePath) {
-        updateData.converted_image_path = convertedImagePath;
-      }
+      // 変換された画像のパスがあれば追加（配列形式で保存）
       if (convertedImagePaths && convertedImagePaths.length > 0) {
         updateData.converted_image_paths = convertedImagePaths;
-      }
-      if (pageCount) {
         updateData.page_count = pageCount;
       }
 
