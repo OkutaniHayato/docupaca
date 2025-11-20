@@ -223,7 +223,7 @@ export default function HistoryDetailPage() {
         const arrayData = fieldData as Array<{[childFieldName: string]: ExtractedValue}>;
         arrayData.forEach((item, index) => {
           Object.entries(item).forEach(([childKey, childValue]) => {
-            if (childValue.bbox && !(childValue.bbox[0] === 0 && childValue.bbox[1] === 0 && childValue.bbox[2] === 0 && childValue.bbox[3] === 0)) {
+            if (childValue && childValue.bbox && !(childValue.bbox[0] === 0 && childValue.bbox[1] === 0 && childValue.bbox[2] === 0 && childValue.bbox[3] === 0)) {
               bboxes.push({
                 key: `${fieldName}[${index}].${childKey}`,
                 value: childValue.value,
@@ -236,7 +236,7 @@ export default function HistoryDetailPage() {
         // 配列フィールド（items構造の場合）
         fieldData.items.forEach((item, index) => {
           Object.entries(item).forEach(([childKey, childValue]) => {
-            if (childValue.bbox && !(childValue.bbox[0] === 0 && childValue.bbox[1] === 0 && childValue.bbox[2] === 0 && childValue.bbox[3] === 0)) {
+            if (childValue && childValue.bbox && !(childValue.bbox[0] === 0 && childValue.bbox[1] === 0 && childValue.bbox[2] === 0 && childValue.bbox[3] === 0)) {
               bboxes.push({
                 key: `${fieldName}[${index}].${childKey}`,
                 value: childValue.value,
@@ -670,6 +670,7 @@ export default function HistoryDetailPage() {
 
                               {/* 配列項目の子フィールド */}
                               {Object.entries(item).map(([childKey, childValue]) => {
+                                if (!childValue) return null; // Skip null values
                                 const fullKey = `${key}[${index}].${childKey}`;
                                 return (
                                   <tr
@@ -763,6 +764,7 @@ export default function HistoryDetailPage() {
 
                               {/* 配列項目の子フィールド */}
                               {Object.entries(item).map(([childKey, childValue]) => {
+                                if (!childValue) return null; // Skip null values
                                 const fullKey = `${key}[${index}].${childKey}`;
                                 return (
                                   <tr
