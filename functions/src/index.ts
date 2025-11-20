@@ -13,9 +13,8 @@ if (typeof pdfjsLib.GlobalWorkerOptions !== 'undefined') {
 }
 
 // ImageDataをグローバルに設定（pdfjs-distがNode.js環境で使用するため）
-if (typeof global !== 'undefined' && !global.ImageData) {
-  (global as Record<string, unknown>).ImageData = ImageData;
-}
+// 常に設定する（Cloud Functions環境での問題を回避）
+(global as Record<string, unknown>).ImageData = ImageData;
 
 // Canvas APIのPolyfill: Path2Dをグローバルにセットアップ
 // @napi-rs/canvasにはPath2Dがないため、pdfjs-dist用に簡易実装を提供
