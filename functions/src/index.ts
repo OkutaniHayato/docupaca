@@ -3,19 +3,22 @@ import * as admin from 'firebase-admin';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { defineSecret } from 'firebase-functions/params';
 import * as crypto from 'crypto';
-import * as pdfjsLib from 'pdfjs-dist';
 import { createCanvas, ImageData } from '@napi-rs/canvas';
 import sharp from 'sharp';
+
+// ImageDataをグローバルに設定（pdfjs-distがNode.js環境で使用するため）
+// pdfjs-distのimport前に設定する必要があるため、requireを使用
+(globalThis as Record<string, unknown>).ImageData = ImageData;
+(global as Record<string, unknown>).ImageData = ImageData;
+
+// pdfjs-distをポリフィル設定後に読み込む（importはホイスティングされるためrequireを使用）
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const pdfjsLib = require('pdfjs-dist') as typeof import('pdfjs-dist');
 
 // pdfjs-distのワーカーを無効化（Node.js環境でフェイクワーカーを使用）
 if (typeof pdfjsLib.GlobalWorkerOptions !== 'undefined') {
   pdfjsLib.GlobalWorkerOptions.workerSrc = '';
 }
-
-// ImageDataをグローバルに設定（pdfjs-distがNode.js環境で使用するため）
-// globalThisを使用してES Moduleスコープからも参照できるようにする
-(globalThis as Record<string, unknown>).ImageData = ImageData;
-(global as Record<string, unknown>).ImageData = ImageData;
 
 // Canvas APIのPolyfill: Path2Dをグローバルにセットアップ
 // @napi-rs/canvasにはPath2Dがないため、pdfjs-dist用に簡易実装を提供
