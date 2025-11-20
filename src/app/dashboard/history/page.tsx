@@ -84,6 +84,13 @@ export default function HistoryPage() {
         });
       });
 
+      // 処理日時の降順（新しい日時が上）にソート
+      histories.sort((a, b) => {
+        const timeA = a.executed_at?.toMillis() || 0;
+        const timeB = b.executed_at?.toMillis() || 0;
+        return timeB - timeA;
+      });
+
       setHistoryList(histories);
 
     } catch (error) {
@@ -181,6 +188,18 @@ export default function HistoryPage() {
       setSelectedFile(null);
       setSelectedSettingId('');
 
+      // 一時的なアイテムを即座にUIに追加（楽観的更新）
+      const tempItem: OcrHistoryItem = {
+        id: `temp_${timestamp}`,
+        setting_id: settingId,
+        status: 'processing',
+        original_file_path: filePath,
+        executed_at: Timestamp.now(),
+      };
+
+      // 新しいアイテムを先頭に追加（降順ソートを維持）
+      setHistoryList(prev => [tempItem, ...prev]);
+
       // 2. executeOcr Cloud Functionを呼び出し（バックグラウンド）
       const functions = getFunctions(undefined, 'asia-northeast1');
       const executeOcr = httpsCallable(functions, 'executeOcr');
@@ -191,16 +210,13 @@ export default function HistoryPage() {
         file_path: filePath,
         user_id: currentUser.uid,
       }).then(() => {
-        // 完了後に履歴を再取得
+        // 完了後に履歴を再取得（一時アイテムを実際のデータで置き換え）
         fetchHistoryList();
       }).catch((error) => {
         console.error('Execute error:', error);
-      });
-
-      // すぐに履歴を再取得して「処理中」ステータスを表示
-      setTimeout(() => {
+        // エラー時も履歴を再取得
         fetchHistoryList();
-      }, 1000);
+      });
 
     } catch (error) {
       console.error('Execute error:', error);

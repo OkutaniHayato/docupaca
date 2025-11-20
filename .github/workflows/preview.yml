@@ -58,22 +58,22 @@ jobs:
           script: |
             const previewUrl = '${{ steps.deploy.outputs.details_url }}';
             const expireTime = '${{ steps.deploy.outputs.expire_time }}';
-            
+
             const comment = `## 🚀 Preview Deployment
-            
+
             ✅ Your preview is ready!
-            
+
             🔗 **Preview URL:** ${previewUrl}
-            
+
             ⏰ This preview will expire on ${expireTime}
-            
+
             ---
-            
+
             📦 **Build Info:**
             - Commit: \`${{ github.sha }}\`
             - Branch: \`${{ github.head_ref }}\`
             `;
-            
+
             github.rest.issues.createComment({
               issue_number: context.issue.number,
               owner: context.repo.owner,
