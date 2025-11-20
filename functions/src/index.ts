@@ -108,10 +108,19 @@ async function retryWithExponentialBackoff<T>(
  */
 async function convertPdfToImage(pdfBuffer: Buffer): Promise<Buffer> {
   try {
+    // pdfjs-distのバージョンに合わせたCDN URL
+    const PDFJS_CDN_BASE = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@4.0.379';
+
     // PDFドキュメントをロード
     // Node.js環境での設定
     const loadingTask = pdfjsLib.getDocument({
       data: new Uint8Array(pdfBuffer),
+      // CMap設定（日本語などのマルチバイト文字に必要）
+      cMapUrl: `${PDFJS_CDN_BASE}/cmaps/`,
+      cMapPacked: true,
+      // 標準フォント設定（PDF標準フォントの表示に必要）
+      standardFontDataUrl: `${PDFJS_CDN_BASE}/standard_fonts/`,
+      // Node.js環境向け設定
       useSystemFonts: true,
       isEvalSupported: false,  // Node.jsではevalを無効化
       isOffscreenCanvasSupported: false,  // Node.jsではOffscreenCanvasを無効化
