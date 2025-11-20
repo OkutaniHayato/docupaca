@@ -66,37 +66,42 @@ async function retryWithExponentialBackoff<T>(
 }
 
 /**
- * PDFを画像に変換する関数（ImageMagick版）
- * - Cloud Functions ランタイムに入っている ImageMagick の `convert` を利用
+ * PDFを画像に変換する関数（Ghostscript版）
+ * - Cloud Functions ランタイムに入っている Ghostscript の `gs` を利用
  * - 1ページ目のみ PNG に変換
  * - 失敗したら null を返し、OCR処理自体は続行
  */
 async function convertPdfToImage(pdfBuffer: Buffer): Promise<Buffer | null> {
   return new Promise<Buffer | null>((resolve) => {
     try {
-      const convert = spawn('convert', [
-        '-density',
-        '150',
-        'pdf:-[0]', // 1ページ目だけ
-        '-quality',
-        '90',
-        'png:-',
+      // Ghostscriptを使用してPDFをPNGに変換
+      const gs = spawn('gs', [
+        '-dSAFER',
+        '-dBATCH',
+        '-dNOPAUSE',
+        '-dFirstPage=1',
+        '-dLastPage=1',
+        '-sDEVICE=png16m',
+        '-r150',
+        '-sOutputFile=-',
+        '-q',
+        '-',
       ]);
 
       const chunks: Buffer[] = [];
       const errors: Buffer[] = [];
 
-      convert.stdout.on('data', (data) => chunks.push(data));
-      convert.stderr.on('data', (data) => errors.push(data));
+      gs.stdout.on('data', (data) => chunks.push(data));
+      gs.stderr.on('data', (data) => errors.push(data));
 
-      convert.on('error', (err) => {
-        functions.logger.error('ImageMagick spawn error:', err);
+      gs.on('error', (err) => {
+        functions.logger.error('Ghostscript spawn error:', err);
         resolve(null);
       });
 
-      convert.on('close', async (code) => {
+      gs.on('close', async (code) => {
         if (code !== 0 || chunks.length === 0) {
-          functions.logger.error('ImageMagick convert failed', {
+          functions.logger.error('Ghostscript convert failed', {
             code,
             stderr: Buffer.concat(errors).toString(),
           });
@@ -118,8 +123,8 @@ async function convertPdfToImage(pdfBuffer: Buffer): Promise<Buffer | null> {
         }
       });
 
-      convert.stdin.write(pdfBuffer);
-      convert.stdin.end();
+      gs.stdin.write(pdfBuffer);
+      gs.stdin.end();
     } catch (error) {
       functions.logger.error('PDF to image conversion failed:', {
         message: error instanceof Error ? error.message : String(error),
