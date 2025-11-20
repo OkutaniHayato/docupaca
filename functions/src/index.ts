@@ -4,12 +4,17 @@ import { GoogleGenerativeAI } from '@google/generative-ai';
 import { defineSecret } from 'firebase-functions/params';
 import * as crypto from 'crypto';
 import * as pdfjsLib from 'pdfjs-dist';
-import { createCanvas } from '@napi-rs/canvas';
+import { createCanvas, ImageData } from '@napi-rs/canvas';
 import sharp from 'sharp';
 
 // pdfjs-distのワーカーを無効化（Node.js環境でフェイクワーカーを使用）
 if (typeof pdfjsLib.GlobalWorkerOptions !== 'undefined') {
   pdfjsLib.GlobalWorkerOptions.workerSrc = '';
+}
+
+// ImageDataをグローバルに設定（pdfjs-distがNode.js環境で使用するため）
+if (typeof global !== 'undefined' && !global.ImageData) {
+  (global as Record<string, unknown>).ImageData = ImageData;
 }
 
 // Canvas APIのPolyfill: Path2Dをグローバルにセットアップ
