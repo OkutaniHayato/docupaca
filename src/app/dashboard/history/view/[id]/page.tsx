@@ -608,22 +608,23 @@ export default function HistoryDetailPage() {
 
                             let normalizedX1, normalizedY1, normalizedX2, normalizedY2;
 
-                            // スケール判定: 画像サイズと比較してピクセル座標かどうかを判定
+                            // スケール判定: 画像サイズの80%以上ならピクセル座標
+                            const maxImageDimension = Math.max(imageDimensions.width, imageDimensions.height);
+
                             if (globalMaxCoord <= 1) {
                               // 0-1の正規化座標
                               normalizedX1 = x1;
                               normalizedY1 = y1;
                               normalizedX2 = x2;
                               normalizedY2 = y2;
-                            } else if (globalMaxCoord > 1000 ||
-                                       (globalMaxCoord > 100 && (globalMaxCoord <= imageDimensions.width * 1.1 || globalMaxCoord <= imageDimensions.height * 1.1))) {
-                              // ピクセル座標: 最大値が1000を超える、または画像サイズに近い場合
+                            } else if (globalMaxCoord > maxImageDimension * 0.8) {
+                              // ピクセル座標: 最大値が画像サイズの80%以上の場合
                               normalizedX1 = x1 / imageDimensions.width;
                               normalizedY1 = y1 / imageDimensions.height;
                               normalizedX2 = x2 / imageDimensions.width;
                               normalizedY2 = y2 / imageDimensions.height;
                             } else {
-                              // 0-1000スケール（一部のOCR APIで使用）
+                              // 0-1000スケール（Gemini APIのデフォルト）
                               normalizedX1 = x1 / 1000;
                               normalizedY1 = y1 / 1000;
                               normalizedX2 = x2 / 1000;
