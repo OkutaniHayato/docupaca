@@ -225,8 +225,8 @@ export default function HistoryDetailPage() {
     setImageDimensions(null);
   }, [currentPage]);
 
-  // すべてのbboxを収集する関数（ネスト構造対応）
-  const collectAllBboxes = (data: ExtractedData): Array<{
+  // すべてのbboxを収集する関数（ネスト構造対応、ページフィルタリング対応）
+  const collectAllBboxes = (data: ExtractedData, pageNumber?: number): Array<{
     key: string;
     value: string;
     bbox: [number, number, number, number];
@@ -237,10 +237,24 @@ export default function HistoryDetailPage() {
       bbox: [number, number, number, number];
     }> = [];
 
+    // bboxが有効かどうかをチェックするヘルパー関数
+    const isValidBbox = (bbox: [number, number, number, number]) => {
+      return !(bbox[0] === 0 && bbox[1] === 0 && bbox[2] === 0 && bbox[3] === 0);
+    };
+
+    // ページフィルタリングをチェックするヘルパー関数
+    const matchesPage = (fieldPage?: number) => {
+      // ページフィルタリングが指定されていない場合はすべて表示
+      if (pageNumber === undefined) return true;
+      // ページ情報がないフィールドは1ページ目として扱う
+      if (fieldPage === undefined) return pageNumber === 1;
+      return fieldPage === pageNumber;
+    };
+
     Object.entries(data).forEach(([fieldName, fieldData]) => {
       if (isExtractedValue(fieldData)) {
         // 単一値フィールド
-        if (fieldData.bbox && !(fieldData.bbox[0] === 0 && fieldData.bbox[1] === 0 && fieldData.bbox[2] === 0 && fieldData.bbox[3] === 0)) {
+        if (fieldData.bbox && isValidBbox(fieldData.bbox) && matchesPage(fieldData.page)) {
           bboxes.push({
             key: fieldName,
             value: fieldData.value,
@@ -252,7 +266,7 @@ export default function HistoryDetailPage() {
         const arrayData = fieldData as Array<{[childFieldName: string]: ExtractedValue}>;
         arrayData.forEach((item, index) => {
           Object.entries(item).forEach(([childKey, childValue]) => {
-            if (childValue && childValue.bbox && !(childValue.bbox[0] === 0 && childValue.bbox[1] === 0 && childValue.bbox[2] === 0 && childValue.bbox[3] === 0)) {
+            if (childValue && childValue.bbox && isValidBbox(childValue.bbox) && matchesPage(childValue.page)) {
               bboxes.push({
                 key: `${fieldName}[${index}].${childKey}`,
                 value: childValue.value,
@@ -265,7 +279,7 @@ export default function HistoryDetailPage() {
         // 配列フィールド（items構造の場合）
         fieldData.items.forEach((item, index) => {
           Object.entries(item).forEach(([childKey, childValue]) => {
-            if (childValue && childValue.bbox && !(childValue.bbox[0] === 0 && childValue.bbox[1] === 0 && childValue.bbox[2] === 0 && childValue.bbox[3] === 0)) {
+            if (childValue && childValue.bbox && isValidBbox(childValue.bbox) && matchesPage(childValue.page)) {
               bboxes.push({
                 key: `${fieldName}[${index}].${childKey}`,
                 value: childValue.value,
@@ -574,7 +588,9 @@ export default function HistoryDetailPage() {
 
                         {/* --- ハイライトボックス（BBox） - ネスト構造対応 --- */}
                         {imageDimensions && (() => {
-                          const allBboxes = collectAllBboxes(history.extracted_data);
+                          // 複数ページの場合はcurrentPageでフィルタリング
+                          const pageFilter = history.convertedImageUrls.length > 1 ? currentPage : undefined;
+                          const allBboxes = collectAllBboxes(history.extracted_data, pageFilter);
 
                           // 全てのbboxから最大座標値を取得してスケールを判定
                           const globalMaxCoord = Math.max(
