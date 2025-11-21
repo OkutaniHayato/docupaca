@@ -592,6 +592,11 @@ export default function HistoryDetailPage() {
                           const pageFilter = history.convertedImageUrls.length > 1 ? currentPage : undefined;
                           const allBboxes = collectAllBboxes(history.extracted_data, pageFilter);
 
+                          // BBOXがない場合は何も表示しない
+                          if (allBboxes.length === 0) {
+                            return null;
+                          }
+
                           // 全てのbboxから最大座標値を取得してスケールを判定
                           const globalMaxCoord = Math.max(
                             ...allBboxes.flatMap(({ bbox }) => bbox)
