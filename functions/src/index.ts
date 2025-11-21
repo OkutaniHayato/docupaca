@@ -3,8 +3,11 @@ import * as admin from 'firebase-admin';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { defineSecret } from 'firebase-functions/params';
 import * as crypto from 'crypto';
-import { spawn } from 'child_process';
+import { spawn, execSync } from 'child_process';
 import sharp from 'sharp';
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
 
 // Firebase Admin初期化
 admin.initializeApp();
@@ -66,73 +69,155 @@ async function retryWithExponentialBackoff<T>(
 }
 
 /**
- * PDFを画像に変換する関数（Ghostscript版）
+ * PDFのページ数を取得する関数
+ */
+function getPdfPageCount(pdfBuffer: Buffer): number {
+  const tmpDir = os.tmpdir();
+  const pdfPath = path.join(tmpDir, `pdf_${Date.now()}.pdf`);
+
+  try {
+    fs.writeFileSync(pdfPath, pdfBuffer);
+
+    // Ghostscriptでページ数を取得
+    const result = execSync(`gs -q -dNODISPLAY -c "(${pdfPath}) (r) file runpdfbegin pdfpagecount = quit"`, {
+      encoding: 'utf-8',
+      timeout: 30000,
+    });
+
+    const pageCount = parseInt(result.trim(), 10);
+    return isNaN(pageCount) ? 1 : pageCount;
+  } catch (error) {
+    functions.logger.error('Failed to get PDF page count:', error);
+    return 1;
+  } finally {
+    try {
+      fs.unlinkSync(pdfPath);
+    } catch {
+      // ignore cleanup errors
+    }
+  }
+}
+
+/**
+ * PDFを画像に変換する関数（複数ページ対応・Ghostscript版）
  * - Cloud Functions ランタイムに入っている Ghostscript の `gs` を利用
- * - 1ページ目のみ PNG に変換
+ * - 全ページを PNG に変換
  * - 失敗したら null を返し、OCR処理自体は続行
  */
-async function convertPdfToImage(pdfBuffer: Buffer): Promise<Buffer | null> {
-  return new Promise<Buffer | null>((resolve) => {
-    try {
-      // Ghostscriptを使用してPDFをPNGに変換
+async function convertPdfToImages(pdfBuffer: Buffer): Promise<{ buffers: Buffer[]; pageCount: number } | null> {
+  const tmpDir = os.tmpdir();
+  const sessionId = Date.now();
+  const pdfPath = path.join(tmpDir, `pdf_${sessionId}.pdf`);
+  const outputPattern = path.join(tmpDir, `page_${sessionId}_%d.png`);
+
+  try {
+    // PDFを一時ファイルに保存
+    fs.writeFileSync(pdfPath, pdfBuffer);
+
+    // ページ数を取得
+    const pageCount = getPdfPageCount(pdfBuffer);
+    functions.logger.info(`PDF has ${pageCount} pages`);
+
+    // Ghostscriptで全ページを変換
+    return new Promise<{ buffers: Buffer[]; pageCount: number } | null>((resolve) => {
       const gs = spawn('gs', [
         '-dSAFER',
         '-dBATCH',
         '-dNOPAUSE',
-        '-dFirstPage=1',
-        '-dLastPage=1',
         '-sDEVICE=png16m',
         '-r150',
-        '-sOutputFile=-',
+        `-sOutputFile=${outputPattern}`,
         '-q',
-        '-',
+        pdfPath,
       ]);
 
-      const chunks: Buffer[] = [];
       const errors: Buffer[] = [];
-
-      gs.stdout.on('data', (data) => chunks.push(data));
       gs.stderr.on('data', (data) => errors.push(data));
 
       gs.on('error', (err) => {
         functions.logger.error('Ghostscript spawn error:', err);
+        cleanup();
         resolve(null);
       });
 
       gs.on('close', async (code) => {
-        if (code !== 0 || chunks.length === 0) {
+        if (code !== 0) {
           functions.logger.error('Ghostscript convert failed', {
             code,
             stderr: Buffer.concat(errors).toString(),
           });
+          cleanup();
           resolve(null);
           return;
         }
 
-        const pngBuffer = Buffer.concat(chunks);
-
-        // sharp で最適化（任意）
         try {
-          const optimized = await sharp(pngBuffer)
-            .png({ quality: 80, compressionLevel: 9 })
-            .toBuffer();
-          resolve(optimized);
-        } catch (e) {
-          functions.logger.error('sharp optimization failed:', e);
-          resolve(pngBuffer);
+          const buffers: Buffer[] = [];
+
+          // 各ページの画像を読み込み最適化
+          for (let i = 1; i <= pageCount; i++) {
+            const pagePath = path.join(tmpDir, `page_${sessionId}_${i}.png`);
+
+            if (fs.existsSync(pagePath)) {
+              const pngBuffer = fs.readFileSync(pagePath);
+
+              // sharp で最適化
+              try {
+                const optimized = await sharp(pngBuffer)
+                  .png({ quality: 80, compressionLevel: 9 })
+                  .toBuffer();
+                buffers.push(optimized);
+              } catch (e) {
+                functions.logger.error(`sharp optimization failed for page ${i}:`, e);
+                buffers.push(pngBuffer);
+              }
+            } else {
+              functions.logger.warn(`Page ${i} not found at ${pagePath}`);
+            }
+          }
+
+          cleanup();
+
+          if (buffers.length === 0) {
+            functions.logger.error('No pages were converted');
+            resolve(null);
+          } else {
+            resolve({ buffers, pageCount: buffers.length });
+          }
+        } catch (error) {
+          functions.logger.error('Error reading converted pages:', error);
+          cleanup();
+          resolve(null);
         }
       });
+    });
 
-      gs.stdin.write(pdfBuffer);
-      gs.stdin.end();
-    } catch (error) {
-      functions.logger.error('PDF to image conversion failed:', {
-        message: error instanceof Error ? error.message : String(error),
-        stack: error instanceof Error ? error.stack : undefined,
-      });
-      resolve(null);
+    function cleanup() {
+      try {
+        fs.unlinkSync(pdfPath);
+      } catch {
+        // ignore
+      }
+      for (let i = 1; i <= 1000; i++) {
+        const pagePath = path.join(tmpDir, `page_${sessionId}_${i}.png`);
+        if (fs.existsSync(pagePath)) {
+          try {
+            fs.unlinkSync(pagePath);
+          } catch {
+            // ignore
+          }
+        } else {
+          break;
+        }
+      }
     }
-  });
+  } catch (error) {
+    functions.logger.error('PDF to image conversion failed:', {
+      message: error instanceof Error ? error.message : String(error),
+      stack: error instanceof Error ? error.stack : undefined,
+    });
+    return null;
+  }
 }
 
 // APIキーのハッシュを検証する関数
@@ -217,6 +302,9 @@ interface OcrHistory {
   setting_id: string;
   status: 'processing' | 'completed' | 'failed';
   original_file_path: string;
+  converted_image_path?: string; // 後方互換性のため残す
+  converted_image_paths?: string[]; // 複数ページ対応
+  page_count?: number;
   extracted_data?: ExtractedData;
   error_message?: string;
   executed_at: admin.firestore.Timestamp;
@@ -369,17 +457,24 @@ export const executeOcr = functions.https.onCall(
       functions.logger.info(`ファイル取得成功: size=${fileBuffer.length} bytes, mimeType=${mimeType}`);
 
       // PDFの場合は画像に変換してCloud Storageに保存
-      let convertedImagePath: string | undefined;
+      let convertedImagePaths: string[] | undefined;
+      let pageCount: number | undefined;
       if (mimeType === 'application/pdf' || file_path.toLowerCase().endsWith('.pdf')) {
         functions.logger.info('Processing PDF for preview...');
 
-        const imageBuffer = await convertPdfToImage(fileBuffer);
+        const result = await convertPdfToImages(fileBuffer);
 
-        if (imageBuffer) {
-          const imagePath = file_path.replace(/\.pdf$/i, '_converted.png');
-          await bucket.file(imagePath).save(imageBuffer, { metadata: { contentType: 'image/png' } });
-          convertedImagePath = imagePath;
-          functions.logger.info(`Preview image saved: ${imagePath}`);
+        if (result) {
+          convertedImagePaths = [];
+          pageCount = result.pageCount;
+
+          // 各ページをCloud Storageに保存
+          for (let i = 0; i < result.buffers.length; i++) {
+            const pagePath = file_path.replace(/\.pdf$/i, `_page_${i + 1}.png`);
+            await bucket.file(pagePath).save(result.buffers[i], { metadata: { contentType: 'image/png' } });
+            convertedImagePaths.push(pagePath);
+            functions.logger.info(`Preview image saved: ${pagePath}`);
+          }
         } else {
           functions.logger.warn('Preview generation skipped due to conversion error.');
         }
@@ -451,9 +546,10 @@ ${jsonSchemaExample}
         extracted_data: extractedData,
       };
 
-      // 変換された画像のパスがあれば追加
-      if (convertedImagePath) {
-        updateData.converted_image_path = convertedImagePath;
+      // 変換された画像のパスがあれば追加（配列形式で保存）
+      if (convertedImagePaths && convertedImagePaths.length > 0) {
+        updateData.converted_image_paths = convertedImagePaths;
+        updateData.page_count = pageCount;
       }
 
       await historyRef.update(updateData);
@@ -645,14 +741,21 @@ export const ocrApi = functions.https.onRequest(
       functions.logger.info(`File saved to storage: ${storagePath}`);
 
       // PDFの場合は画像に変換してCloud Storageに保存
-      let convertedImagePath: string | undefined;
+      let convertedImagePaths: string[] | undefined;
+      let pageCount: number | undefined;
       if (mimeType === 'application/pdf') {
-        const imageBuffer = await convertPdfToImage(fileBuffer);
-        if (imageBuffer) {
-          const imagePath = storagePath.replace(/\.pdf$/i, '_converted.png');
-          await bucket.file(imagePath).save(imageBuffer, { metadata: { contentType: 'image/png' } });
-          convertedImagePath = imagePath;
-          functions.logger.info(`PDF converted to image: ${imagePath}`);
+        const result = await convertPdfToImages(fileBuffer);
+        if (result) {
+          convertedImagePaths = [];
+          pageCount = result.pageCount;
+
+          // 各ページをCloud Storageに保存
+          for (let i = 0; i < result.buffers.length; i++) {
+            const pagePath = storagePath.replace(/\.pdf$/i, `_page_${i + 1}.png`);
+            await bucket.file(pagePath).save(result.buffers[i], { metadata: { contentType: 'image/png' } });
+            convertedImagePaths.push(pagePath);
+            functions.logger.info(`PDF converted to image: ${pagePath}`);
+          }
         } else {
           functions.logger.warn('PDF to image conversion failed, continuing with OCR.');
         }
@@ -736,9 +839,10 @@ ${jsonSchemaExample}
         extracted_data: extractedData,
       };
 
-      // 変換された画像のパスがあれば追加
-      if (convertedImagePath) {
-        updateData.converted_image_path = convertedImagePath;
+      // 変換された画像のパスがあれば追加（配列形式で保存）
+      if (convertedImagePaths && convertedImagePaths.length > 0) {
+        updateData.converted_image_paths = convertedImagePaths;
+        updateData.page_count = pageCount;
       }
 
       await historyRef.update(updateData);

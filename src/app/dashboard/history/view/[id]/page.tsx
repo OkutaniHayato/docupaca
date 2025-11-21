@@ -28,10 +28,13 @@ interface HistoryDetail {
   id: string;
   status: string;
   original_file_path: string;
-  converted_image_path?: string; // PDF→画像変換後のパス
+  converted_image_path?: string; // PDF→画像変換後のパス（後方互換性）
+  converted_image_paths?: string[]; // 複数ページ対応
+  page_count?: number;
   extracted_data: ExtractedData;
   imageUrl: string | null;
-  convertedImageUrl: string | null; // 変換された画像のURL
+  convertedImageUrl: string | null; // 変換された画像のURL（後方互換性）
+  convertedImageUrls: string[]; // 複数ページの画像URL
   setting?: OcrSetting; // OCR設定情報
   setting_id?: string; // OCR設定ID
 }
@@ -47,6 +50,7 @@ export default function HistoryDetailPage() {
   const [expandedArrays, setExpandedArrays] = useState<Set<string>>(new Set());
   const [selectedField, setSelectedField] = useState<string | null>(null);
   const [initialExpansionDone, setInitialExpansionDone] = useState(false);
+  const [currentPage, setCurrentPage] = useState(1);
   const imageRef = useRef<HTMLImageElement>(null);
   const params = useParams();
   const { currentUser } = useAuth();
@@ -111,6 +115,7 @@ export default function HistoryDetailPage() {
         // 4. 画像URLを取得（ファイルが存在しない場合は null）
         let downloadUrl: string | null = null;
         let convertedImageUrl: string | null = null;
+        const convertedImageUrls: string[] = [];
 
         try {
           const imageRef = ref(storage, data.original_file_path);
@@ -120,11 +125,27 @@ export default function HistoryDetailPage() {
           // ファイルが存在しない場合でも処理を続行
         }
 
-        // 変換された画像がある場合は取得
-        if (data.converted_image_path) {
+        // 複数ページの変換された画像がある場合は取得
+        if (data.converted_image_paths && Array.isArray(data.converted_image_paths)) {
+          for (const imagePath of data.converted_image_paths) {
+            try {
+              const convertedRef = ref(storage, imagePath);
+              const url = await getDownloadURL(convertedRef);
+              convertedImageUrls.push(url);
+            } catch (storageError) {
+              console.warn(`変換された画像が見つかりません: ${imagePath}`, storageError);
+            }
+          }
+          // 後方互換性のため1ページ目のURLも設定
+          if (convertedImageUrls.length > 0) {
+            convertedImageUrl = convertedImageUrls[0];
+          }
+        } else if (data.converted_image_path) {
+          // 後方互換性: 旧フォーマット（単一パス）の場合
           try {
             const convertedRef = ref(storage, data.converted_image_path);
             convertedImageUrl = await getDownloadURL(convertedRef);
+            convertedImageUrls.push(convertedImageUrl);
           } catch (storageError) {
             console.warn("変換された画像が見つかりません:", storageError);
           }
@@ -152,9 +173,12 @@ export default function HistoryDetailPage() {
           status: data.status,
           original_file_path: data.original_file_path,
           converted_image_path: data.converted_image_path,
+          converted_image_paths: data.converted_image_paths,
+          page_count: data.page_count || (convertedImageUrls.length > 0 ? convertedImageUrls.length : undefined),
           extracted_data: extractedData,
           imageUrl: downloadUrl,
           convertedImageUrl: convertedImageUrl,
+          convertedImageUrls: convertedImageUrls,
           setting_id: data.setting_id,
           setting: {
             name: settingData.name || '設定名なし',
@@ -195,6 +219,11 @@ export default function HistoryDetailPage() {
       }
     }
   }, [history, initialExpansionDone]);
+
+  // ページが変わったときに画像寸法をリセット
+  useEffect(() => {
+    setImageDimensions(null);
+  }, [currentPage]);
 
   // すべてのbboxを収集する関数（ネスト構造対応）
   const collectAllBboxes = (data: ExtractedData): Array<{
@@ -422,8 +451,48 @@ export default function HistoryDetailPage() {
         {/* --- 1. 元画像/PDFとハイライト表示 --- */}
         <div className="border border-gray-300 rounded-lg overflow-hidden bg-gray-50">
           {/* 変換された画像または元画像を表示 */}
-          {history.convertedImageUrl || history.imageUrl ? (
+          {(history.convertedImageUrls.length > 0 || history.imageUrl) ? (
             <div>
+              {/* ページナビゲーション（複数ページの場合） */}
+              {history.convertedImageUrls.length > 1 && (
+                <div className="bg-gray-100 border-b border-gray-200 px-4 py-3 flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
+                      disabled={currentPage === 1}
+                      className="px-3 py-1 rounded bg-white border border-gray-300 text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50"
+                    >
+                      前へ
+                    </button>
+                    <span className="text-sm font-medium text-gray-700">
+                      {currentPage} / {history.convertedImageUrls.length} ページ
+                    </span>
+                    <button
+                      onClick={() => setCurrentPage(prev => Math.min(history.convertedImageUrls.length, prev + 1))}
+                      disabled={currentPage === history.convertedImageUrls.length}
+                      className="px-3 py-1 rounded bg-white border border-gray-300 text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50"
+                    >
+                      次へ
+                    </button>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <label htmlFor="page-select" className="text-sm text-gray-600">ページ:</label>
+                    <select
+                      id="page-select"
+                      value={currentPage}
+                      onChange={(e) => setCurrentPage(Number(e.target.value))}
+                      className="px-2 py-1 rounded border border-gray-300 text-sm"
+                    >
+                      {Array.from({ length: history.convertedImageUrls.length }, (_, i) => (
+                        <option key={i + 1} value={i + 1}>
+                          {i + 1}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+              )}
+
               {/* ズーム操作説明 */}
               <div className="bg-blue-50 border-b border-blue-200 px-4 py-2 text-sm text-blue-800">
                 マウスホイールでズーム、ドラッグで移動できます
@@ -487,8 +556,12 @@ export default function HistoryDetailPage() {
                         {/* eslint-disable-next-line @next/next/no-img-element */}
                         <img
                           ref={imageRef}
-                          src={history.convertedImageUrl || history.imageUrl!}
-                          alt="Original Document"
+                          src={
+                            history.convertedImageUrls.length > 0
+                              ? history.convertedImageUrls[currentPage - 1]
+                              : history.imageUrl!
+                          }
+                          alt={`Document Page ${currentPage}`}
                           className="max-h-[calc(100vh-250px)] w-auto h-auto"
                           onLoad={(e) => {
                             const img = e.target as HTMLImageElement;

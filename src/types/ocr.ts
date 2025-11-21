@@ -100,8 +100,14 @@ export interface OcrHistory {
   /** 元ファイルパス（Cloud Storage） */
   original_file_path: string;
 
-  /** 変換後画像パス（PDFの場合） */
+  /** 変換後画像パス（PDFの場合）- 後方互換性のため残す */
   converted_image_path?: string;
+
+  /** 変換後画像パス（複数ページ対応） */
+  converted_image_paths?: string[];
+
+  /** PDFのページ数 */
+  page_count?: number;
 
   /** 抽出データ */
   extracted_data?: ExtractedData;
