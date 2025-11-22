@@ -51,6 +51,7 @@ export default function HistoryDetailPage() {
   const [selectedField, setSelectedField] = useState<string | null>(null);
   const [initialExpansionDone, setInitialExpansionDone] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
+  const [showBboxHighlight, setShowBboxHighlight] = useState(true);
   const imageRef = useRef<HTMLImageElement>(null);
   const params = useParams();
   const { currentUser } = useAuth();
@@ -474,28 +475,28 @@ export default function HistoryDetailPage() {
                     <button
                       onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
                       disabled={currentPage === 1}
-                      className="px-3 py-1 rounded bg-white border border-gray-300 text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50"
+                      className="px-3 py-1 rounded bg-white border border-gray-300 text-sm font-medium text-black disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50"
                     >
                       前へ
                     </button>
-                    <span className="text-sm font-medium text-gray-700">
+                    <span className="text-sm font-medium text-black">
                       {currentPage} / {history.convertedImageUrls.length} ページ
                     </span>
                     <button
                       onClick={() => setCurrentPage(prev => Math.min(history.convertedImageUrls.length, prev + 1))}
                       disabled={currentPage === history.convertedImageUrls.length}
-                      className="px-3 py-1 rounded bg-white border border-gray-300 text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50"
+                      className="px-3 py-1 rounded bg-white border border-gray-300 text-sm font-medium text-black disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50"
                     >
                       次へ
                     </button>
                   </div>
                   <div className="flex items-center gap-2">
-                    <label htmlFor="page-select" className="text-sm text-gray-600">ページ:</label>
+                    <label htmlFor="page-select" className="text-sm text-black">ページ:</label>
                     <select
                       id="page-select"
                       value={currentPage}
                       onChange={(e) => setCurrentPage(Number(e.target.value))}
-                      className="px-2 py-1 rounded border border-gray-300 text-sm"
+                      className="px-2 py-1 rounded border border-gray-300 text-sm text-black"
                     >
                       {Array.from({ length: history.convertedImageUrls.length }, (_, i) => (
                         <option key={i + 1} value={i + 1}>
@@ -507,9 +508,21 @@ export default function HistoryDetailPage() {
                 </div>
               )}
 
-              {/* ズーム操作説明 */}
-              <div className="bg-blue-50 border-b border-blue-200 px-4 py-2 text-sm text-blue-800">
-                マウスホイールでズーム、ドラッグで移動できます
+              {/* ズーム操作説明とハイライトON/OFF */}
+              <div className="bg-blue-50 border-b border-blue-200 px-4 py-2 flex items-center justify-between">
+                <span className="text-sm text-blue-800">
+                  マウスホイールでズーム、ドラッグで移動できます
+                </span>
+                <button
+                  onClick={() => setShowBboxHighlight(prev => !prev)}
+                  className={`px-3 py-1 rounded text-sm font-medium border ${
+                    showBboxHighlight
+                      ? 'bg-green-100 border-green-300 text-green-800 hover:bg-green-200'
+                      : 'bg-gray-100 border-gray-300 text-gray-800 hover:bg-gray-200'
+                  }`}
+                >
+                  {showBboxHighlight ? 'ハイライト ON' : 'ハイライト OFF'}
+                </button>
               </div>
 
               <div className="relative">
@@ -528,7 +541,7 @@ export default function HistoryDetailPage() {
                           className="bg-white border border-gray-300 rounded-lg p-2 shadow-md hover:bg-gray-100"
                           title="拡大"
                         >
-                          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <svg className="w-5 h-5 text-black" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
                           </svg>
                         </button>
@@ -537,7 +550,7 @@ export default function HistoryDetailPage() {
                           className="bg-white border border-gray-300 rounded-lg p-2 shadow-md hover:bg-gray-100"
                           title="縮小"
                         >
-                          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <svg className="w-5 h-5 text-black" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20 12H4" />
                           </svg>
                         </button>
@@ -546,7 +559,7 @@ export default function HistoryDetailPage() {
                           className="bg-white border border-gray-300 rounded-lg p-2 shadow-md hover:bg-gray-100"
                           title="リセット"
                         >
-                          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <svg className="w-5 h-5 text-black" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
                           </svg>
                         </button>
@@ -587,7 +600,7 @@ export default function HistoryDetailPage() {
                         />
 
                         {/* --- ハイライトボックス（BBox） - ネスト構造対応 --- */}
-                        {imageDimensions && (() => {
+                        {imageDimensions && showBboxHighlight && (() => {
                           // 複数ページの場合はcurrentPageでフィルタリング
                           const pageFilter = history.convertedImageUrls.length > 1 ? currentPage : undefined;
                           const allBboxes = collectAllBboxes(history.extracted_data, pageFilter);
