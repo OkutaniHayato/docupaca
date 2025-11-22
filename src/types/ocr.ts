@@ -38,6 +38,9 @@ export interface ExtractedValue {
 
   /** バウンディングボックス座標 */
   bbox: BBox;
+
+  /** ページ番号（1から開始、複数ページPDF用） */
+  page?: number;
 }
 
 /**

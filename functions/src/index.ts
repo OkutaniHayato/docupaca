@@ -512,32 +512,137 @@ ${jsonSchemaExample}
 
       functions.logger.info('Gemini API呼び出し開始');
 
-      // Gemini APIリクエスト
-      const imagePart = {
-        inlineData: {
-          data: fileBuffer.toString('base64'),
-          mimeType: mimeType,
-        },
-      };
-
-      // リトライ処理付きでGemini APIを呼び出し
-      const text = await retryWithExponentialBackoff(async () => {
-        const result = await model.generateContent([imagePart, prompt]);
-        const response = await result.response;
-        return response.text();
-      });
-
-      functions.logger.info('Gemini API応答受信');
-
-      // 5. レスポンスをパース
+      // 5. 複数ページPDFの場合は各ページを個別に処理、それ以外は従来どおり
       let extractedData: OcrHistory['extracted_data'];
-      try {
-        // マークダウンのコードブロックを除去
-        const cleanedText = text.replace(/```json\n?|\n?```/g, '').trim();
-        extractedData = JSON.parse(cleanedText);
-      } catch (error) {
-        functions.logger.error('JSON解析エラー:', error);
-        throw new Error(`Gemini API応答のJSON解析に失敗しました: ${text.substring(0, 200)}`);
+
+      if (convertedImagePaths && convertedImagePaths.length > 1) {
+        // 複数ページPDF: 各ページを個別にGemini APIで処理
+        functions.logger.info(`複数ページPDF処理開始: ${convertedImagePaths.length}ページ`);
+
+        const allExtractedData: Record<string, unknown> = {};
+
+        for (let pageIndex = 0; pageIndex < convertedImagePaths.length; pageIndex++) {
+          const pagePath = convertedImagePaths[pageIndex];
+          const pageNumber = pageIndex + 1;
+
+          functions.logger.info(`ページ ${pageNumber}/${convertedImagePaths.length} を処理中...`);
+
+          // ページ画像をダウンロード
+          const pageFile = bucket.file(pagePath);
+          const [pageBuffer] = await pageFile.download();
+
+          const pageImagePart = {
+            inlineData: {
+              data: pageBuffer.toString('base64'),
+              mimeType: 'image/png',
+            },
+          };
+
+          // ページ用のプロンプト（ページ番号を含める指示を追加）
+          const pagePrompt = `${prompt}
+6. 重要: このドキュメントの${pageNumber}ページ目を処理しています。すべてのbboxにはpageプロパティを追加し、値は${pageNumber}としてください。
+   例: {"value": "抽出された値", "bbox": [x1, y1, x2, y2], "page": ${pageNumber}}`;
+
+          // リトライ処理付きでGemini APIを呼び出し
+          const pageText = await retryWithExponentialBackoff(async () => {
+            const result = await model.generateContent([pageImagePart, pagePrompt]);
+            const response = await result.response;
+            return response.text();
+          });
+
+          // ページのレスポンスをパース
+          let pageExtractedData: Record<string, unknown>;
+          try {
+            const cleanedText = pageText.replace(/```json\n?|\n?```/g, '').trim();
+            pageExtractedData = JSON.parse(cleanedText);
+          } catch (error) {
+            functions.logger.error(`ページ ${pageNumber} のJSON解析エラー:`, error);
+            throw new Error(`ページ ${pageNumber} のGemini API応答のJSON解析に失敗しました: ${pageText.substring(0, 200)}`);
+          }
+
+          // ページ番号をすべてのextracted_dataに付加（APIが付加していない場合のフォールバック）
+          const addPageNumber = (data: unknown): unknown => {
+            if (Array.isArray(data)) {
+              return data.map(item => addPageNumber(item));
+            } else if (data && typeof data === 'object') {
+              const obj = data as Record<string, unknown>;
+              // ExtractedValue形式の場合（value と bbox を持つ）
+              if ('value' in obj && 'bbox' in obj) {
+                return { ...obj, page: obj.page || pageNumber };
+              }
+              // ExtractedArrayData形式の場合（items を持つ）
+              if ('items' in obj && Array.isArray(obj.items)) {
+                return {
+                  ...obj,
+                  items: obj.items.map(item => addPageNumber(item)),
+                };
+              }
+              // その他のオブジェクト
+              const result: Record<string, unknown> = {};
+              for (const key in obj) {
+                result[key] = addPageNumber(obj[key]);
+              }
+              return result;
+            }
+            return data;
+          };
+
+          const pageDataWithPageNumber = addPageNumber(pageExtractedData) as Record<string, unknown>;
+
+          // ページごとのデータを統合
+          for (const [fieldName, fieldValue] of Object.entries(pageDataWithPageNumber)) {
+            if (allExtractedData[fieldName]) {
+              // 既存のフィールドがある場合、配列フィールドならマージ
+              const existing = allExtractedData[fieldName] as Record<string, unknown>;
+              const newValue = fieldValue as Record<string, unknown>;
+
+              if (Array.isArray(existing.items) && Array.isArray(newValue.items)) {
+                // 配列フィールドの場合、itemsをマージ
+                existing.items = [...existing.items, ...newValue.items];
+              } else if ('value' in existing && 'value' in newValue) {
+                // 単一値フィールドの場合、ページごとに配列に変換
+                allExtractedData[fieldName] = {
+                  items: [existing, newValue],
+                };
+              }
+            } else {
+              allExtractedData[fieldName] = fieldValue;
+            }
+          }
+
+          functions.logger.info(`ページ ${pageNumber} の処理完了`);
+        }
+
+        extractedData = allExtractedData as OcrHistory['extracted_data'];
+        functions.logger.info('全ページの処理完了');
+
+      } else {
+        // 単一ページまたは画像ファイル: 従来どおり処理
+        const imagePart = {
+          inlineData: {
+            data: fileBuffer.toString('base64'),
+            mimeType: mimeType,
+          },
+        };
+
+        // リトライ処理付きでGemini APIを呼び出し
+        const text = await retryWithExponentialBackoff(async () => {
+          const result = await model.generateContent([imagePart, prompt]);
+          const response = await result.response;
+          return response.text();
+        });
+
+        functions.logger.info('Gemini API応答受信');
+
+        // レスポンスをパース
+        try {
+          // マークダウンのコードブロックを除去
+          const cleanedText = text.replace(/```json\n?|\n?```/g, '').trim();
+          extractedData = JSON.parse(cleanedText);
+        } catch (error) {
+          functions.logger.error('JSON解析エラー:', error);
+          throw new Error(`Gemini API応答のJSON解析に失敗しました: ${text.substring(0, 200)}`);
+        }
       }
 
       // 6. ocr_historyを更新（成功）
