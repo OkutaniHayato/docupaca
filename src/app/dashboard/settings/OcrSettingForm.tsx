@@ -45,6 +45,7 @@ interface OcrSettingFormProps {
   onSave: (data: OcrSettingFormData, file: File | null) => Promise<void>;
   isLoading: boolean;
   saveButtonText?: string;
+  isTemplateMode?: boolean; // テンプレートからコピーモード
 }
 
 interface PreviewContentProps {
@@ -145,7 +146,8 @@ export default function OcrSettingForm({
   initialData,
   onSave,
   isLoading,
-  saveButtonText = "保存する"
+  saveButtonText = "保存する",
+  isTemplateMode = false
 }: OcrSettingFormProps) {
 
   const [formData, setFormData] = useState<OcrSettingFormData>(
@@ -335,12 +337,17 @@ export default function OcrSettingForm({
 
     try {
       // FormDataを作成してファイルを送信
-      const formData = new FormData();
-      formData.append('file', uploadedFile);
+      const apiFormData = new FormData();
+      apiFormData.append('file', uploadedFile);
+
+      // テンプレートモードの場合、既存のフィールド構造を送信
+      if (isTemplateMode && formData.extraction_fields.length > 0) {
+        apiFormData.append('existing_fields', JSON.stringify(formData.extraction_fields));
+      }
 
       const response = await fetch('/api/analyze-document', {
         method: 'POST',
-        body: formData,
+        body: apiFormData,
       });
 
       if (!response.ok) {
@@ -351,8 +358,6 @@ export default function OcrSettingForm({
       const result = await response.json();
 
       if (result.success && result.data) {
-        // 設定名を自動入力（帳票名から生成）
-        // 後方互換性: type プロパティがない場合は 'single' をデフォルトとする
         // 再帰的に type と children を正規化する関数
         const normalizeField = (field: Partial<ExtractionField>): ExtractionField => {
           const normalizedField: ExtractionField = {
@@ -369,16 +374,61 @@ export default function OcrSettingForm({
           return normalizedField;
         };
 
-        const normalizedFields = result.data.extractionFields.map(normalizeField);
+        if (isTemplateMode && formData.extraction_fields.length > 0) {
+          // テンプレートモード：既存フィールド構造を維持しながらinstructionを更新
+          const updatedFields = formData.extraction_fields.map((existingField) => {
+            // AIレスポンスから同じ名前のフィールドを探す
+            const aiField = result.data.extractionFields.find(
+              (f: ExtractionField) => f.name === existingField.name
+            );
 
-        setFormData(prev => ({
-          ...prev,
-          name: `${result.data.documentName}の設定`,
-          prompt_text: result.data.extractionInstruction,
-          extraction_fields: normalizedFields,
-        }));
+            if (aiField) {
+              // instructionを更新、構造は既存のものを維持
+              const updatedField: ExtractionField = {
+                ...existingField,
+                instruction: aiField.instruction || existingField.instruction,
+              };
 
-        alert('AI解析が完了しました！設定が自動入力されました。');
+              // 配列フィールドの場合、子フィールドのinstructionも更新
+              if (existingField.type === 'array' && existingField.children) {
+                updatedField.children = existingField.children.map((existingChild) => {
+                  const aiChild = aiField.children?.find(
+                    (c: ExtractionField) => c.name === existingChild.name
+                  );
+                  return {
+                    ...existingChild,
+                    instruction: aiChild?.instruction || existingChild.instruction,
+                  };
+                });
+              }
+
+              return updatedField;
+            }
+
+            // 対応するフィールドが見つからない場合は既存のフィールドをそのまま使用
+            return existingField;
+          });
+
+          setFormData(prev => ({
+            ...prev,
+            prompt_text: result.data.extractionInstruction,
+            extraction_fields: updatedFields,
+          }));
+
+          alert('AI解析が完了しました！既存のフィールド構造を維持したまま、抽出指示が更新されました。');
+        } else {
+          // 通常モード：新規フィールド生成
+          const normalizedFields = result.data.extractionFields.map(normalizeField);
+
+          setFormData(prev => ({
+            ...prev,
+            name: `${result.data.documentName}の設定`,
+            prompt_text: result.data.extractionInstruction,
+            extraction_fields: normalizedFields,
+          }));
+
+          alert('AI解析が完了しました！設定が自動入力されました。');
+        }
       } else {
         throw new Error('解析結果が不正です');
       }
