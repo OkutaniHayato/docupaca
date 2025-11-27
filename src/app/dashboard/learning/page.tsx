@@ -263,12 +263,9 @@ export default function LearningSettingsPage() {
     setMessage(null);
 
     try {
-      // Firebase Cloud Functions のURLを構築（asia-northeast1リージョン）
-      const projectId = process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID;
-      const functionUrl = `https://asia-northeast1-${projectId}.cloudfunctions.net/runCorrectionLearning`;
-
+      // Next.js APIルートを呼び出す
       const token = await currentUser.getIdToken();
-      const response = await fetch(functionUrl, {
+      const response = await fetch('/api/run-correction-learning', {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${token}`,
@@ -276,11 +273,11 @@ export default function LearningSettingsPage() {
         },
       });
 
-      if (!response.ok) {
-        throw new Error('学習バッチの実行に失敗しました');
-      }
-
       const result = await response.json();
+
+      if (!response.ok) {
+        throw new Error(result.error || '学習バッチの実行に失敗しました');
+      }
 
       if (result.success) {
         setMessage({
@@ -299,7 +296,8 @@ export default function LearningSettingsPage() {
       setTimeout(() => setMessage(null), 5000);
     } catch (error) {
       console.error('手動実行に失敗:', error);
-      setMessage({ type: 'error', text: '学習バッチの実行に失敗しました' });
+      const errorMessage = error instanceof Error ? error.message : '学習バッチの実行に失敗しました';
+      setMessage({ type: 'error', text: errorMessage });
     } finally {
       setExecuting(false);
     }
