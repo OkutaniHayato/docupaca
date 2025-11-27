@@ -335,31 +335,28 @@ export default function HistoryPage() {
   const getStatusChip = (status: string) => {
     switch (status) {
       case 'completed':
-        // Success カラー
         return (
-          <span className="rounded-full bg-green-100 px-2 py-1 text-xs font-medium text-green-800 flex items-center gap-1">
+          <span className="rounded-full bg-green-100 px-2 py-0.5 text-xs font-medium text-green-700 flex items-center gap-1">
             <svg className="h-3 w-3" fill="currentColor" viewBox="0 0 20 20">
               <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
             </svg>
-            Completed
+            完了
           </span>
         );
       case 'failed':
-        // Error カラー
         return (
-          <span className="rounded-full bg-red-100 px-2 py-1 text-xs font-medium text-red-800 flex items-center gap-1">
+          <span className="rounded-full bg-red-100 px-2 py-0.5 text-xs font-medium text-red-700 flex items-center gap-1">
             <svg className="h-3 w-3" fill="currentColor" viewBox="0 0 20 20">
               <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
             </svg>
-            Failed
+            失敗
           </span>
         );
       default:
-        // Secondary カラー - 処理中アニメーション
         return (
-          <span className="rounded-full bg-blue-100 px-2 py-1 text-xs font-medium text-blue-800 flex items-center gap-1">
-            <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-blue-800"></div>
-            Processing
+          <span className="rounded-full bg-blue-100 px-2 py-0.5 text-xs font-medium text-blue-700 flex items-center gap-1">
+            <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-blue-700"></div>
+            処理中
           </span>
         );
     }
@@ -602,66 +599,65 @@ export default function HistoryPage() {
         <table className="w-full">
           <thead>
             <tr className="border-b">
-              <th className="p-3 text-left text-sm font-semibold text-gray-600">ステータス</th>
+              <th className="p-3 text-left text-sm font-semibold text-gray-600 w-24">ステータス</th>
               <th className="p-3 text-left text-sm font-semibold text-gray-600">ファイル名</th>
-              <th className="p-3 text-left text-sm font-semibold text-gray-600">OCR設定名</th>
-              <th className="p-3 text-left text-sm font-semibold text-gray-600">実行日時</th>
-              <th className="p-3 text-left text-sm font-semibold text-gray-600">アクション</th>
+              <th className="p-3 text-left text-sm font-semibold text-gray-600 w-48">OCR設定名</th>
+              <th className="p-3 text-left text-sm font-semibold text-gray-600 w-44">実行日時</th>
             </tr>
           </thead>
           <tbody>
             {isLoading ? (
               <tr>
-                <td colSpan={5} className="p-3 text-center text-gray-500">読み込み中...</td>
+                <td colSpan={4} className="p-3 text-center text-gray-500">読み込み中...</td>
               </tr>
             ) : historyList.length === 0 ? (
               <tr>
-                <td colSpan={5} className="p-3 text-center text-gray-500">実行履歴はありません。</td>
+                <td colSpan={4} className="p-3 text-center text-gray-500">実行履歴はありません。</td>
               </tr>
             ) : (
               historyList.map((item) => {
-                // ファイル名を取得（長い場合は省略）
+                // ファイル名を取得（タイムスタンプ部分を除去）
                 const fullFileName = item.original_file_path.split('/').pop() || '';
-                const displayFileName = fullFileName.length > 30
-                  ? fullFileName.slice(0, 27) + '...'
-                  : fullFileName;
+                // タイムスタンプ_ファイル名 形式の場合、タイムスタンプを除去
+                const cleanFileName = fullFileName.replace(/^\d+_/, '');
+                const displayFileName = cleanFileName.length > 40
+                  ? cleanFileName.slice(0, 37) + '...'
+                  : cleanFileName;
 
                 return (
                   <tr key={item.id} className="border-b hover:bg-gray-50">
                     <td className="p-3">{getStatusChip(item.status)}</td>
                     <td className="p-3">
+                      <Link
+                        href={`/dashboard/history/view/${item.id}`}
+                        className="text-sm text-green-800 hover:text-green-600 hover:underline font-medium"
+                        title={cleanFileName}
+                      >
+                        {displayFileName}
+                      </Link>
+                    </td>
+                    <td className="p-3">
                       <div className="flex items-center gap-2">
-                        <span className="text-sm text-gray-700" title={fullFileName}>
-                          {displayFileName}
-                        </span>
                         {item.status === 'completed' && (
                           item.isHumanConfirmed ? (
-                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-700 border border-blue-200">
+                            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-700">
                               <CheckCircle className="w-3 h-3" />
                               確定
                             </span>
                           ) : (
-                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-600 border border-gray-200">
+                            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-500">
                               <Clock className="w-3 h-3" />
                               未確定
                             </span>
                           )
                         )}
+                        <span className="text-sm text-gray-700">
+                          {item.settingName}
+                        </span>
                       </div>
-                    </td>
-                    <td className="p-3 text-sm text-gray-700">
-                      {item.settingName}
                     </td>
                     <td className="p-3 text-sm text-gray-500">
                       {item.executed_at.toDate().toLocaleString()}
-                    </td>
-                    <td className="p-3 text-sm">
-                      <Link
-                        href={`/dashboard/history/view/${item.id}`}
-                        className="font-medium text-green-800 hover:text-green-700"
-                      >
-                        詳細
-                      </Link>
                     </td>
                   </tr>
                 );
