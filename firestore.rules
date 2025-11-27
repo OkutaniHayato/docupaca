@@ -15,6 +15,11 @@ service cloud.firestore {
     //   allow read: if isAuthenticated();
     //   allow write: if isAuthenticated() && request.auth.uid == userId;
     // }
+    //
+    // corrections コレクション（訂正ログ）:
+    // match /corrections/{correctionId} {
+    //   allow read, write: if isAuthenticated();
+    // }
     // ========================================
     
     match /{document=**} {
