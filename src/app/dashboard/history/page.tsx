@@ -601,18 +601,19 @@ export default function HistoryPage() {
             <tr className="border-b">
               <th className="p-3 text-left text-sm font-semibold text-gray-600" style={{ width: '90px' }}>ステータス</th>
               <th className="p-3 text-left text-sm font-semibold text-gray-600" style={{ width: '35%' }}>ファイル名</th>
-              <th className="p-3 text-left text-sm font-semibold text-gray-600" style={{ width: '30%' }}>OCR設定名</th>
+              <th className="p-3 text-left text-sm font-semibold text-gray-600" style={{ width: '80px' }}>確定</th>
+              <th className="p-3 text-left text-sm font-semibold text-gray-600" style={{ width: '25%' }}>OCR設定名</th>
               <th className="p-3 text-left text-sm font-semibold text-gray-600" style={{ width: '160px' }}>実行日時</th>
             </tr>
           </thead>
           <tbody>
             {isLoading ? (
               <tr>
-                <td colSpan={4} className="p-3 text-center text-gray-500">読み込み中...</td>
+                <td colSpan={5} className="p-3 text-center text-gray-500">読み込み中...</td>
               </tr>
             ) : historyList.length === 0 ? (
               <tr>
-                <td colSpan={4} className="p-3 text-center text-gray-500">実行履歴はありません。</td>
+                <td colSpan={5} className="p-3 text-center text-gray-500">実行履歴はありません。</td>
               </tr>
             ) : (
               historyList.map((item) => {
@@ -637,24 +638,24 @@ export default function HistoryPage() {
                       </Link>
                     </td>
                     <td className="p-3">
-                      <div className="flex items-center gap-2">
-                        {item.status === 'completed' && (
-                          item.isHumanConfirmed ? (
-                            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-700">
-                              <CheckCircle className="w-3 h-3" />
-                              確定
-                            </span>
-                          ) : (
-                            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-500">
-                              <Clock className="w-3 h-3" />
-                              未確定
-                            </span>
-                          )
-                        )}
-                        <span className="text-sm text-gray-700">
-                          {item.settingName}
-                        </span>
-                      </div>
+                      {item.status === 'completed' && (
+                        item.isHumanConfirmed ? (
+                          <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-700">
+                            <CheckCircle className="w-3 h-3" />
+                            確定
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-500">
+                            <Clock className="w-3 h-3" />
+                            未確定
+                          </span>
+                        )
+                      )}
+                    </td>
+                    <td className="p-3">
+                      <span className="text-sm text-gray-700">
+                        {item.settingName}
+                      </span>
                     </td>
                     <td className="p-3 text-sm text-gray-500">
                       {item.executed_at.toDate().toLocaleString()}
