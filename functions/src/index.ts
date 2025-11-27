@@ -1107,7 +1107,7 @@ export const learnFromCorrections = functions.scheduler.onSchedule(
  * 開発・テスト用
  *
  * リクエスト:
- * - Headers: Authorization: Bearer <API_KEY>
+ * - Headers: Authorization: Bearer <API_KEY or Firebase ID Token>
  * - Query Parameters:
  *   - lookbackDays: 過去何日分を対象にするか（デフォルト: 30）
  *   - minCount: 最低何回の訂正で学習するか（デフォルト: 3）
@@ -1135,18 +1135,31 @@ export const runCorrectionLearning = functions.https.onRequest(
       return;
     }
 
-    // 認証チェック
+    // 認証チェック（Firebase ID Token または API Key）
     const authHeader = req.headers.authorization;
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
       res.status(401).json({ success: false, error: 'Authorization header missing or invalid' });
       return;
     }
 
-    const apiKey = authHeader.substring(7);
-    const userId = await verifyApiKey(apiKey);
+    const token = authHeader.substring(7);
+    let userId: string | null = null;
+
+    // まずFirebase ID Tokenとして検証を試みる
+    try {
+      const decodedToken = await admin.auth().verifyIdToken(token);
+      userId = decodedToken.uid;
+      functions.logger.info('Firebase ID Token認証成功', { userId });
+    } catch {
+      // Firebase ID Tokenでない場合、API Keyとして検証
+      userId = await verifyApiKey(token);
+      if (userId) {
+        functions.logger.info('API Key認証成功', { userId });
+      }
+    }
 
     if (!userId) {
-      res.status(401).json({ success: false, error: 'Invalid API key' });
+      res.status(401).json({ success: false, error: 'Invalid authentication token' });
       return;
     }
 

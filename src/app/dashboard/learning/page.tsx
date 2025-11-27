@@ -263,9 +263,9 @@ export default function LearningSettingsPage() {
     setMessage(null);
 
     try {
-      // Firebase Cloud Functions のURLを構築
+      // Firebase Cloud Functions のURLを構築（asia-northeast1リージョン）
       const projectId = process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID;
-      const functionUrl = `https://us-central1-${projectId}.cloudfunctions.net/runCorrectionLearning`;
+      const functionUrl = `https://asia-northeast1-${projectId}.cloudfunctions.net/runCorrectionLearning`;
 
       const token = await currentUser.getIdToken();
       const response = await fetch(functionUrl, {
