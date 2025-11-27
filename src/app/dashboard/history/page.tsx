@@ -13,7 +13,7 @@ import {
 } from 'firebase/firestore';
 import { ref, uploadBytes } from 'firebase/storage';
 import { getFunctions, httpsCallable } from 'firebase/functions';
-import { Upload, X, Sparkles, AlertCircle, CheckCircle2, Zap } from 'lucide-react';
+import { Upload, X, Sparkles, AlertCircle, CheckCircle2, Zap, CheckCircle, Clock } from 'lucide-react';
 
 // 自動実行の信頼度閾値（90%以上で自動実行）
 const AUTO_EXECUTE_THRESHOLD = 0.9;
@@ -25,8 +25,8 @@ interface OcrHistoryItem {
   status: 'processing' | 'completed' | 'failed';
   original_file_path: string;
   executed_at: Timestamp;
-  // TODO: setting_id から設定名 (name) を取得して表示する
-  settingName?: string;
+  settingName?: string; // OCR設定名
+  isHumanConfirmed?: boolean; // 人間確定済みかどうか
 }
 
 // OCR設定の型定義（AI判定用のフィールドを含む）
@@ -80,7 +80,14 @@ export default function HistoryPage() {
       const settingsQuery = query(settingsRef, where("owner_id", "==", currentUser.uid));
       const settingsSnapshot = await getDocs(settingsQuery);
 
-      const settingIds = settingsSnapshot.docs.map(doc => doc.id);
+      // 設定IDと設定名のマップを作成
+      const settingsMap = new Map<string, string>();
+      settingsSnapshot.docs.forEach(doc => {
+        const data = doc.data();
+        settingsMap.set(doc.id, data.displayName || data.name || doc.id);
+      });
+
+      const settingIds = Array.from(settingsMap.keys());
 
       if (settingIds.length === 0) {
         setHistoryList([]);
@@ -102,6 +109,8 @@ export default function HistoryPage() {
           status: data.status,
           original_file_path: data.original_file_path,
           executed_at: data.executed_at,
+          settingName: settingsMap.get(data.setting_id) || data.setting_id,
+          isHumanConfirmed: data.isHumanConfirmed || false,
         });
       });
 
@@ -326,31 +335,28 @@ export default function HistoryPage() {
   const getStatusChip = (status: string) => {
     switch (status) {
       case 'completed':
-        // Success カラー
         return (
-          <span className="rounded-full bg-green-100 px-2 py-1 text-xs font-medium text-green-800 flex items-center gap-1">
+          <span className="rounded-full bg-green-100 px-2 py-0.5 text-xs font-medium text-green-700 flex items-center gap-1">
             <svg className="h-3 w-3" fill="currentColor" viewBox="0 0 20 20">
               <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
             </svg>
-            Completed
+            完了
           </span>
         );
       case 'failed':
-        // Error カラー
         return (
-          <span className="rounded-full bg-red-100 px-2 py-1 text-xs font-medium text-red-800 flex items-center gap-1">
+          <span className="rounded-full bg-red-100 px-2 py-0.5 text-xs font-medium text-red-700 flex items-center gap-1">
             <svg className="h-3 w-3" fill="currentColor" viewBox="0 0 20 20">
               <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
             </svg>
-            Failed
+            失敗
           </span>
         );
       default:
-        // Secondary カラー - 処理中アニメーション
         return (
-          <span className="rounded-full bg-blue-100 px-2 py-1 text-xs font-medium text-blue-800 flex items-center gap-1">
-            <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-blue-800"></div>
-            Processing
+          <span className="rounded-full bg-blue-100 px-2 py-0.5 text-xs font-medium text-blue-700 flex items-center gap-1">
+            <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-blue-700"></div>
+            処理中
           </span>
         );
     }
@@ -590,14 +596,14 @@ export default function HistoryPage() {
       )}
 
       <div className="rounded-lg border border-gray-200 bg-white shadow-sm">
-        <table className="w-full">
+        <table className="w-full table-fixed">
           <thead>
             <tr className="border-b">
-              <th className="p-3 text-left text-sm font-semibold text-gray-600">ステータス</th>
-              <th className="p-3 text-left text-sm font-semibold text-gray-600">ファイル名</th>
-              <th className="p-3 text-left text-sm font-semibold text-gray-600">設定名 (ID)</th>
-              <th className="p-3 text-left text-sm font-semibold text-gray-600">実行日時</th>
-              <th className="p-3 text-left text-sm font-semibold text-gray-600">アクション</th>
+              <th className="p-3 text-left text-sm font-semibold text-gray-600" style={{ width: '90px' }}>ステータス</th>
+              <th className="p-3 text-left text-sm font-semibold text-gray-600" style={{ width: '35%' }}>ファイル名</th>
+              <th className="p-3 text-left text-sm font-semibold text-gray-600" style={{ width: '80px' }}>確定</th>
+              <th className="p-3 text-left text-sm font-semibold text-gray-600" style={{ width: '25%' }}>OCR設定名</th>
+              <th className="p-3 text-left text-sm font-semibold text-gray-600" style={{ width: '160px' }}>実行日時</th>
             </tr>
           </thead>
           <tbody>
@@ -610,30 +616,53 @@ export default function HistoryPage() {
                 <td colSpan={5} className="p-3 text-center text-gray-500">実行履歴はありません。</td>
               </tr>
             ) : (
-              historyList.map((item) => (
-                <tr key={item.id} className="border-b hover:bg-gray-50">
-                  <td className="p-3">{getStatusChip(item.status)}</td>
-                  <td className="p-3 text-sm text-gray-700">
-                    {/* */}
-                    {item.original_file_path.split('/').pop()}
-                  </td>
-                  <td className="p-3 text-sm text-gray-500 font-mono">
-                    {/* */}
-                    {item.settingName || `...${item.setting_id.slice(-6)}`}
-                  </td>
-                  <td className="p-3 text-sm text-gray-500">
-                    {item.executed_at.toDate().toLocaleString()}
-                  </td>
-                  <td className="p-3 text-sm">
-                    <Link 
-                      href={`/dashboard/history/view/${item.id}`} // 
-                      className="font-medium text-green-800 hover:text-green-700"
-                    >
-                      詳細
-                    </Link>
-                  </td>
-                </tr>
-              ))
+              historyList.map((item) => {
+                // ファイル名を取得（タイムスタンプ部分を除去）
+                const fullFileName = item.original_file_path.split('/').pop() || '';
+                // タイムスタンプ_ファイル名 形式の場合、タイムスタンプを除去
+                const cleanFileName = fullFileName.replace(/^\d+_/, '');
+                const displayFileName = cleanFileName.length > 40
+                  ? cleanFileName.slice(0, 37) + '...'
+                  : cleanFileName;
+
+                return (
+                  <tr key={item.id} className="border-b hover:bg-gray-50">
+                    <td className="p-3">{getStatusChip(item.status)}</td>
+                    <td className="p-3">
+                      <Link
+                        href={`/dashboard/history/view/${item.id}`}
+                        className="text-sm text-green-800 hover:text-green-600 hover:underline font-medium"
+                        title={cleanFileName}
+                      >
+                        {displayFileName}
+                      </Link>
+                    </td>
+                    <td className="p-3">
+                      {item.status === 'completed' && (
+                        item.isHumanConfirmed ? (
+                          <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-700">
+                            <CheckCircle className="w-3 h-3" />
+                            確定
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-500">
+                            <Clock className="w-3 h-3" />
+                            未確定
+                          </span>
+                        )
+                      )}
+                    </td>
+                    <td className="p-3">
+                      <span className="text-sm text-gray-700">
+                        {item.settingName}
+                      </span>
+                    </td>
+                    <td className="p-3 text-sm text-gray-500">
+                      {item.executed_at.toDate().toLocaleString()}
+                    </td>
+                  </tr>
+                );
+              })
             )}
           </tbody>
         </table>

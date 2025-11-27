@@ -268,6 +268,8 @@ type BBox = [number, number, number, number];
 interface ExtractedValue {
   value: string;
   bbox: BBox;
+  page?: number;
+  confidence?: number; // AI抽出の信頼度（0〜1.0）
 }
 
 /**
@@ -330,6 +332,7 @@ function generateJsonSchemaFromFields(fields: ExtractionField[]): string {
       schema[field.name] = {
         value: '抽出された値',
         bbox: [0, 0, 0, 0],
+        confidence: 0.95,
       };
     } else if (field.type === 'array' && field.children) {
       // 配列フィールド
@@ -338,6 +341,7 @@ function generateJsonSchemaFromFields(fields: ExtractionField[]): string {
         childSchema[child.name] = {
           value: '抽出された値',
           bbox: [0, 0, 0, 0],
+          confidence: 0.95,
         };
       }
 
@@ -504,11 +508,16 @@ ${extractionFieldsDescription}
 ${jsonSchemaExample}
 
 重要な注意事項:
-1. 単一値フィールドは {"value": "抽出された値", "bbox": [x1, y1, x2, y2]} の形式
+1. 単一値フィールドは {"value": "抽出された値", "bbox": [x1, y1, x2, y2], "confidence": 0.95} の形式
 2. 配列フィールドは {"items": [...], "bbox": [x1, y1, x2, y2]} の形式
-3. 配列の各要素は子フィールドのオブジェクト
+3. 配列の各要素は子フィールドのオブジェクト（各子フィールドにもconfidenceを含める）
 4. bboxは該当箇所の座標を[左上x, 左上y, 右下x, 右下y]の形式で記載（正規化座標0-1推奨）
-5. 座標が不明な場合は[0, 0, 0, 0]としてください`;
+5. 座標が不明な場合は[0, 0, 0, 0]としてください
+6. 【信頼度の出力が必須】各フィールドに必ずconfidenceを0〜1.0の数値で出力してください:
+   - 1.0: 非常に自信がある（文字がはっきり読める、フォーマットが明確）
+   - 0.8〜0.9: ある程度自信がある
+   - 0.5〜0.7: やや不確か（文字がかすれている、推測が入る）
+   - 0.5未満: 自信がない（読み取りにくい、推測要素が大きい）`;
 
       functions.logger.info('Gemini API呼び出し開始');
 
@@ -540,8 +549,8 @@ ${jsonSchemaExample}
 
           // ページ用のプロンプト（ページ番号を含める指示を追加）
           const pagePrompt = `${prompt}
-6. 重要: このドキュメントの${pageNumber}ページ目を処理しています。すべてのbboxにはpageプロパティを追加し、値は${pageNumber}としてください。
-   例: {"value": "抽出された値", "bbox": [x1, y1, x2, y2], "page": ${pageNumber}}`;
+7. 重要: このドキュメントの${pageNumber}ページ目を処理しています。すべてのbboxにはpageプロパティを追加し、値は${pageNumber}としてください。
+   例: {"value": "抽出された値", "bbox": [x1, y1, x2, y2], "confidence": 0.95, "page": ${pageNumber}}`;
 
           // リトライ処理付きでGemini APIを呼び出し
           const pageText = await retryWithExponentialBackoff(async () => {
@@ -895,11 +904,16 @@ ${extractionFieldsDescription}
 ${jsonSchemaExample}
 
 重要な注意事項:
-1. 単一値フィールドは {"value": "抽出された値", "bbox": [x1, y1, x2, y2]} の形式
+1. 単一値フィールドは {"value": "抽出された値", "bbox": [x1, y1, x2, y2], "confidence": 0.95} の形式
 2. 配列フィールドは {"items": [...], "bbox": [x1, y1, x2, y2]} の形式
-3. 配列の各要素は子フィールドのオブジェクト
+3. 配列の各要素は子フィールドのオブジェクト（各子フィールドにもconfidenceを含める）
 4. bboxは該当箇所の座標を[左上x, 左上y, 右下x, 右下y]の形式で記載（正規化座標0-1推奨）
-5. 座標が不明な場合は[0, 0, 0, 0]としてください`;
+5. 座標が不明な場合は[0, 0, 0, 0]としてください
+6. 【信頼度の出力が必須】各フィールドに必ずconfidenceを0〜1.0の数値で出力してください:
+   - 1.0: 非常に自信がある（文字がはっきり読める、フォーマットが明確）
+   - 0.8〜0.9: ある程度自信がある
+   - 0.5〜0.7: やや不確か（文字がかすれている、推測が入る）
+   - 0.5未満: 自信がない（読み取りにくい、推測要素が大きい）`;
 
       functions.logger.info('Calling Gemini API...');
 

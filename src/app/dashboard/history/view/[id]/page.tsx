@@ -15,7 +15,11 @@ import {
   ExtractedArrayData,
   isExtractedArrayData,
   isExtractedValue,
+  BBox,
+  CorrectionLog,
 } from '@/types/ocr';
+import { AlertTriangle, CheckCircle, AlertCircle, Edit3, Save, X } from 'lucide-react';
+import { updateDoc, collection, addDoc, Timestamp } from 'firebase/firestore';
 
 interface OcrSetting {
   name: string;
@@ -32,12 +36,89 @@ interface HistoryDetail {
   converted_image_paths?: string[]; // 複数ページ対応
   page_count?: number;
   extracted_data: ExtractedData;
+  humanConfirmedData?: ExtractedData; // 人間確定データ
+  isHumanConfirmed?: boolean; // 人間による確定が完了したかどうか
   imageUrl: string | null;
   convertedImageUrl: string | null; // 変換された画像のURL（後方互換性）
   convertedImageUrls: string[]; // 複数ページの画像URL
   setting?: OcrSetting; // OCR設定情報
   setting_id?: string; // OCR設定ID
 }
+
+/**
+ * 信頼度を表示用の形式に変換
+ */
+const formatConfidence = (confidence?: number): string => {
+  if (confidence === undefined || confidence === null) return '-';
+  return `${Math.round(confidence * 100)}%`;
+};
+
+/**
+ * 信頼度に応じた色とアイコンを取得
+ * >= 0.8: 緑（通常）
+ * 0.5〜0.8: 黄（注意）
+ * < 0.5: 赤（要確認）
+ */
+const getConfidenceStyle = (confidence?: number): {
+  bgColor: string;
+  textColor: string;
+  borderColor: string;
+  icon: React.ReactNode;
+  label: string;
+} => {
+  if (confidence === undefined || confidence === null) {
+    return {
+      bgColor: 'bg-gray-100',
+      textColor: 'text-gray-500',
+      borderColor: 'border-gray-300',
+      icon: null,
+      label: '-',
+    };
+  }
+
+  if (confidence >= 0.8) {
+    return {
+      bgColor: 'bg-green-50',
+      textColor: 'text-green-700',
+      borderColor: 'border-green-300',
+      icon: <CheckCircle className="w-4 h-4 text-green-600" />,
+      label: '高信頼度',
+    };
+  } else if (confidence >= 0.5) {
+    return {
+      bgColor: 'bg-yellow-50',
+      textColor: 'text-yellow-700',
+      borderColor: 'border-yellow-300',
+      icon: <AlertTriangle className="w-4 h-4 text-yellow-600" />,
+      label: '注意',
+    };
+  } else {
+    return {
+      bgColor: 'bg-red-50',
+      textColor: 'text-red-700',
+      borderColor: 'border-red-300',
+      icon: <AlertCircle className="w-4 h-4 text-red-600" />,
+      label: '要確認',
+    };
+  }
+};
+
+/**
+ * 信頼度バッジコンポーネント
+ */
+const ConfidenceBadge: React.FC<{ confidence?: number; showIcon?: boolean }> = ({
+  confidence,
+  showIcon = true
+}) => {
+  const style = getConfidenceStyle(confidence);
+
+  return (
+    <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium ${style.bgColor} ${style.textColor} border ${style.borderColor}`}>
+      {showIcon && style.icon}
+      {formatConfidence(confidence)}
+    </span>
+  );
+};
 
 /**
  * OCR実行履歴 詳細ページ
@@ -56,6 +137,12 @@ export default function HistoryDetailPage() {
   const params = useParams();
   const { currentUser } = useAuth();
 
+  // 編集モード関連の状態
+  const [isEditMode, setIsEditMode] = useState(false);
+  const [editedData, setEditedData] = useState<ExtractedData | null>(null);
+  const [isSaving, setIsSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+
   const historyId = params.id as string;
 
   const toggleArrayExpansion = (fieldName: string) => {
@@ -68,6 +155,118 @@ export default function HistoryDetailPage() {
       }
       return newSet;
     });
+  };
+
+  /**
+   * 確定データを保存し、差分ログ（corrections）を生成
+   */
+  const handleSaveConfirmedData = async () => {
+    if (!history || !editedData || !currentUser) return;
+
+    setIsSaving(true);
+    setSaveError(null);
+
+    try {
+      const historyRef = doc(db, 'ocr_history', historyId);
+      const aiData = history.extracted_data;
+
+      // corrections を生成（AIの値と人間確定値の差分）
+      const corrections: Omit<CorrectionLog, 'createdAt'>[] = [];
+
+      /**
+       * 値を比較して差分を検出するヘルパー関数
+       */
+      const compareAndAddCorrection = (
+        fieldKey: string,
+        aiValue: ExtractedValue | null | undefined,
+        humanValue: ExtractedValue | null | undefined
+      ) => {
+        if (!aiValue || !humanValue) return;
+        if (aiValue.value !== humanValue.value) {
+          corrections.push({
+            docId: historyId,
+            templateId: history.setting_id || '',
+            fieldKey,
+            aiValue: aiValue.value,
+            humanValue: humanValue.value,
+            aiConfidence: aiValue.confidence ?? 0,
+            bbox: aiValue.bbox,
+            page: aiValue.page,
+          });
+        }
+      };
+
+      // 単一値フィールドと配列フィールドを走査して差分を検出
+      Object.entries(aiData).forEach(([key, aiFieldData]) => {
+        const humanFieldData = editedData[key];
+
+        if (isExtractedValue(aiFieldData) && isExtractedValue(humanFieldData)) {
+          // 単一値フィールドの比較
+          compareAndAddCorrection(key, aiFieldData, humanFieldData);
+        } else if (isExtractedArrayData(aiFieldData) && isExtractedArrayData(humanFieldData)) {
+          // 配列フィールド（items構造）の比較
+          aiFieldData.items.forEach((aiItem, index) => {
+            const humanItem = humanFieldData.items[index];
+            if (!humanItem) return;
+
+            Object.entries(aiItem).forEach(([childKey, aiChildValue]) => {
+              const humanChildValue = humanItem[childKey];
+              const fullKey = `${key}[${index}].${childKey}`;
+              compareAndAddCorrection(fullKey, aiChildValue, humanChildValue);
+            });
+          });
+        } else if (Array.isArray(aiFieldData) && Array.isArray(humanFieldData)) {
+          // 直接配列の比較
+          const aiArr = aiFieldData as Array<{[k: string]: ExtractedValue}>;
+          const humanArr = humanFieldData as Array<{[k: string]: ExtractedValue}>;
+
+          aiArr.forEach((aiItem, index) => {
+            const humanItem = humanArr[index];
+            if (!humanItem) return;
+
+            Object.entries(aiItem).forEach(([childKey, aiChildValue]) => {
+              const humanChildValue = humanItem[childKey];
+              const fullKey = `${key}[${index}].${childKey}`;
+              compareAndAddCorrection(fullKey, aiChildValue, humanChildValue);
+            });
+          });
+        }
+      });
+
+      // ocr_history を更新
+      await updateDoc(historyRef, {
+        humanConfirmedData: editedData,
+        isHumanConfirmed: true,
+        confirmedAt: Timestamp.now(),
+      });
+
+      // corrections をFirestoreに保存（差分がある場合のみ）
+      if (corrections.length > 0) {
+        const correctionsRef = collection(db, 'corrections');
+        for (const correction of corrections) {
+          await addDoc(correctionsRef, {
+            ...correction,
+            createdAt: Timestamp.now(),
+          });
+        }
+        console.log(`${corrections.length}件の訂正ログを保存しました`);
+      }
+
+      // 状態を更新
+      setHistory({
+        ...history,
+        humanConfirmedData: editedData,
+        isHumanConfirmed: true,
+      });
+      setIsEditMode(false);
+      setEditedData(null);
+
+    } catch (err) {
+      console.error('Error saving confirmed data:', err);
+      setSaveError('データの保存に失敗しました。もう一度お試しください。');
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   useEffect(() => {
@@ -177,6 +376,8 @@ export default function HistoryDetailPage() {
           converted_image_paths: data.converted_image_paths,
           page_count: data.page_count || (convertedImageUrls.length > 0 ? convertedImageUrls.length : undefined),
           extracted_data: extractedData,
+          humanConfirmedData: data.humanConfirmedData || undefined,
+          isHumanConfirmed: data.isHumanConfirmed || false,
           imageUrl: downloadUrl,
           convertedImageUrl: convertedImageUrl,
           convertedImageUrls: convertedImageUrls,
@@ -713,7 +914,62 @@ export default function HistoryDetailPage() {
 
         {/* --- 2. 抽出結果テーブル --- */}
         <div>
-          <h3 className="text-lg font-semibold mb-4 text-gray-900">抽出結果</h3>
+          <div className="flex justify-between items-center mb-4">
+            <div className="flex items-center gap-3">
+              <h3 className="text-lg font-semibold text-gray-900">抽出結果</h3>
+              {history.isHumanConfirmed && (
+                <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800 border border-blue-200">
+                  <CheckCircle className="w-3 h-3" />
+                  確定済み
+                </span>
+              )}
+            </div>
+            <div className="flex items-center gap-2">
+              {!isEditMode ? (
+                <button
+                  onClick={() => {
+                    // 編集開始時に現在のデータ（人間確定データがあればそれ、なければAI抽出データ）をコピー
+                    const baseData = history.humanConfirmedData || history.extracted_data;
+                    setEditedData(JSON.parse(JSON.stringify(baseData)));
+                    setIsEditMode(true);
+                    setSaveError(null);
+                  }}
+                  className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm font-medium"
+                >
+                  <Edit3 className="w-4 h-4" />
+                  編集
+                </button>
+              ) : (
+                <>
+                  <button
+                    onClick={() => {
+                      setIsEditMode(false);
+                      setEditedData(null);
+                      setSaveError(null);
+                    }}
+                    className="inline-flex items-center gap-2 px-4 py-2 bg-gray-500 text-white rounded-lg hover:bg-gray-600 transition-colors text-sm font-medium"
+                    disabled={isSaving}
+                  >
+                    <X className="w-4 h-4" />
+                    キャンセル
+                  </button>
+                  <button
+                    onClick={handleSaveConfirmedData}
+                    className="inline-flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+                    disabled={isSaving}
+                  >
+                    <Save className="w-4 h-4" />
+                    {isSaving ? '保存中...' : '確定保存'}
+                  </button>
+                </>
+              )}
+            </div>
+          </div>
+          {saveError && (
+            <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm">
+              {saveError}
+            </div>
+          )}
           <div className="rounded-lg border border-gray-200 bg-white shadow-sm">
             {Object.keys(history.extracted_data).length === 0 ? (
               <div className="p-6 text-center text-gray-500">
@@ -733,7 +989,10 @@ export default function HistoryDetailPage() {
                   <tr className="border-b">
                     <th className="p-3 text-left text-sm font-semibold text-gray-600">項目名</th>
                     <th className="p-3 text-left text-sm font-semibold text-gray-600">タイプ</th>
-                    <th className="p-3 text-left text-sm font-semibold text-gray-600">抽出された値</th>
+                    <th className="p-3 text-left text-sm font-semibold text-gray-600">信頼度</th>
+                    <th className="p-3 text-left text-sm font-semibold text-gray-600">
+                      {isEditMode ? '編集値' : (history.isHumanConfirmed ? '確定値' : 'AI抽出値')}
+                    </th>
                   </tr>
                 </thead>
                 <tbody>
@@ -762,6 +1021,7 @@ export default function HistoryDetailPage() {
                                 配列 ({arrayData.length}件)
                               </span>
                             </td>
+                            <td className="p-3 text-sm text-gray-500">-</td>
                             <td className="p-3 text-sm text-gray-500 italic">
                               {isExpanded ? '展開中' : 'クリックで展開'}
                             </td>
@@ -772,7 +1032,7 @@ export default function HistoryDetailPage() {
                             <React.Fragment key={`${key}-${index}`}>
                               {/* 配列項目のヘッダー行 */}
                               <tr className="border-b bg-gray-100">
-                                <td colSpan={3} className="p-2 pl-8 text-xs font-semibold text-gray-700">
+                                <td colSpan={4} className="p-2 pl-8 text-xs font-semibold text-gray-700">
                                   {key}[{index}]
                                 </td>
                               </tr>
@@ -781,11 +1041,24 @@ export default function HistoryDetailPage() {
                               {Object.entries(item).map(([childKey, childValue]) => {
                                 if (!childValue) return null; // Skip null values
                                 const fullKey = `${key}[${index}].${childKey}`;
+                                const childConfidenceStyle = getConfidenceStyle(childValue.confidence);
+
+                                // 人間確定データから子の値を取得（直接配列の場合）
+                                const getHumanConfirmedChildValueDirect = () => {
+                                  if (!history.humanConfirmedData) return null;
+                                  const parentData = history.humanConfirmedData[key];
+                                  if (!Array.isArray(parentData)) return null;
+                                  const itemData = (parentData as Array<{[k: string]: ExtractedValue}>)[index];
+                                  if (!itemData) return null;
+                                  return itemData[childKey]?.value;
+                                };
+                                const displayChildValue = getHumanConfirmedChildValueDirect() || childValue.value;
+
                                 return (
                                   <tr
                                     key={fullKey}
                                     className={`border-b hover:bg-blue-50 cursor-pointer transition-colors ${
-                                      selectedField === fullKey ? 'bg-blue-100' : 'bg-gray-50'
+                                      selectedField === fullKey ? 'bg-blue-100' : childConfidenceStyle.bgColor
                                     }`}
                                     onClick={() => setSelectedField(fullKey)}
                                   >
@@ -800,8 +1073,40 @@ export default function HistoryDetailPage() {
                                         子フィールド
                                       </span>
                                     </td>
+                                    <td className="p-3">
+                                      <ConfidenceBadge confidence={childValue.confidence} />
+                                    </td>
                                     <td className="p-3 text-sm text-gray-600 font-mono">
-                                      {childValue.value}
+                                      {isEditMode ? (
+                                        <input
+                                          type="text"
+                                          value={(() => {
+                                            if (!editedData) return displayChildValue;
+                                            const parentData = editedData[key];
+                                            if (!Array.isArray(parentData)) return displayChildValue;
+                                            const itemData = (parentData as Array<{[k: string]: ExtractedValue}>)[index];
+                                            return itemData?.[childKey]?.value || displayChildValue;
+                                          })()}
+                                          onChange={(e) => {
+                                            if (!editedData) return;
+                                            const newData = JSON.parse(JSON.stringify(editedData)) as ExtractedData;
+                                            const parentData = newData[key];
+                                            if (Array.isArray(parentData)) {
+                                              const arr = parentData as Array<{[k: string]: ExtractedValue}>;
+                                              if (arr[index]) {
+                                                arr[index][childKey] = {
+                                                  ...childValue,
+                                                  value: e.target.value,
+                                                };
+                                              }
+                                            }
+                                            setEditedData(newData);
+                                          }}
+                                          className="w-full px-2 py-1 border border-gray-300 rounded text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                        />
+                                      ) : (
+                                        displayChildValue
+                                      )}
                                     </td>
                                   </tr>
                                 );
@@ -814,12 +1119,17 @@ export default function HistoryDetailPage() {
 
                     if (isExtractedValue(fieldData)) {
                       // 単一値フィールド
+                      const displayValue = history.humanConfirmedData && isExtractedValue(history.humanConfirmedData[key])
+                        ? (history.humanConfirmedData[key] as ExtractedValue).value
+                        : fieldData.value;
+                      const confidenceStyle = getConfidenceStyle(fieldData.confidence);
+
                       return (
                         <tr
                           key={key}
                           className={`border-b hover:bg-blue-50 cursor-pointer transition-colors ${
                             selectedField === key ? 'bg-blue-100' : ''
-                          }`}
+                          } ${confidenceStyle.bgColor}`}
                           onClick={() => setSelectedField(key)}
                         >
                           <td className="p-3 text-sm font-medium text-gray-800">{key}</td>
@@ -828,8 +1138,29 @@ export default function HistoryDetailPage() {
                               単一値
                             </span>
                           </td>
+                          <td className="p-3">
+                            <ConfidenceBadge confidence={fieldData.confidence} />
+                          </td>
                           <td className="p-3 text-sm text-gray-600 font-mono">
-                            {fieldData.value}
+                            {isEditMode ? (
+                              <input
+                                type="text"
+                                value={(editedData && isExtractedValue(editedData[key])) ? (editedData[key] as ExtractedValue).value : displayValue}
+                                onChange={(e) => {
+                                  if (!editedData) return;
+                                  const newData = { ...editedData };
+                                  if (isExtractedValue(newData[key])) {
+                                    (newData[key] as ExtractedValue).value = e.target.value;
+                                  } else {
+                                    newData[key] = { ...fieldData, value: e.target.value };
+                                  }
+                                  setEditedData(newData);
+                                }}
+                                className="w-full px-2 py-1 border border-gray-300 rounded text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                              />
+                            ) : (
+                              displayValue
+                            )}
                           </td>
                         </tr>
                       );
@@ -856,6 +1187,7 @@ export default function HistoryDetailPage() {
                                 配列 ({fieldData.items.length}件)
                               </span>
                             </td>
+                            <td className="p-3 text-sm text-gray-500">-</td>
                             <td className="p-3 text-sm text-gray-500 italic">
                               {isExpanded ? '展開中' : 'クリックで展開'}
                             </td>
@@ -866,7 +1198,7 @@ export default function HistoryDetailPage() {
                             <React.Fragment key={`${key}-${index}`}>
                               {/* 配列項目のヘッダー行 */}
                               <tr className="border-b bg-gray-100">
-                                <td colSpan={3} className="p-2 pl-8 text-xs font-semibold text-gray-700">
+                                <td colSpan={4} className="p-2 pl-8 text-xs font-semibold text-gray-700">
                                   {key}[{index}]
                                 </td>
                               </tr>
@@ -875,11 +1207,24 @@ export default function HistoryDetailPage() {
                               {Object.entries(item).map(([childKey, childValue]) => {
                                 if (!childValue) return null; // Skip null values
                                 const fullKey = `${key}[${index}].${childKey}`;
+                                const childConfidenceStyle = getConfidenceStyle(childValue.confidence);
+
+                                // 人間確定データから子の値を取得
+                                const getHumanConfirmedChildValue = () => {
+                                  if (!history.humanConfirmedData) return null;
+                                  const parentData = history.humanConfirmedData[key];
+                                  if (!isExtractedArrayData(parentData)) return null;
+                                  const itemData = parentData.items[index];
+                                  if (!itemData) return null;
+                                  return itemData[childKey]?.value;
+                                };
+                                const displayChildValue = getHumanConfirmedChildValue() || childValue.value;
+
                                 return (
                                   <tr
                                     key={fullKey}
                                     className={`border-b hover:bg-blue-50 cursor-pointer transition-colors ${
-                                      selectedField === fullKey ? 'bg-blue-100' : 'bg-gray-50'
+                                      selectedField === fullKey ? 'bg-blue-100' : childConfidenceStyle.bgColor
                                     }`}
                                     onClick={() => setSelectedField(fullKey)}
                                   >
@@ -894,8 +1239,36 @@ export default function HistoryDetailPage() {
                                         子フィールド
                                       </span>
                                     </td>
+                                    <td className="p-3">
+                                      <ConfidenceBadge confidence={childValue.confidence} />
+                                    </td>
                                     <td className="p-3 text-sm text-gray-600 font-mono">
-                                      {childValue.value}
+                                      {isEditMode ? (
+                                        <input
+                                          type="text"
+                                          value={(() => {
+                                            if (!editedData) return displayChildValue;
+                                            const parentData = editedData[key];
+                                            if (!isExtractedArrayData(parentData)) return displayChildValue;
+                                            return parentData.items[index]?.[childKey]?.value || displayChildValue;
+                                          })()}
+                                          onChange={(e) => {
+                                            if (!editedData) return;
+                                            const newData = JSON.parse(JSON.stringify(editedData)) as ExtractedData;
+                                            const parentData = newData[key];
+                                            if (isExtractedArrayData(parentData) && parentData.items[index]) {
+                                              parentData.items[index][childKey] = {
+                                                ...childValue,
+                                                value: e.target.value,
+                                              };
+                                            }
+                                            setEditedData(newData);
+                                          }}
+                                          className="w-full px-2 py-1 border border-gray-300 rounded text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                        />
+                                      ) : (
+                                        displayChildValue
+                                      )}
                                     </td>
                                   </tr>
                                 );

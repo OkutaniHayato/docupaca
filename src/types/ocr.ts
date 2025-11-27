@@ -41,6 +41,9 @@ export interface ExtractedValue {
 
   /** ページ番号（1から開始、複数ページPDF用） */
   page?: number;
+
+  /** AI抽出の信頼度（0〜1.0、1.0が最も自信あり） */
+  confidence?: number;
 }
 
 /**
@@ -156,6 +159,50 @@ export interface OcrHistory {
 
   /** ユーザーが選択したテンプレートID（初期値はpredictedTemplateId） */
   chosenTemplateId?: string;
+
+  // === 人間確定関連（機能②） ===
+
+  /** 人間が確定したデータ（AI抽出結果を上書き） */
+  humanConfirmedData?: ExtractedData;
+
+  /** 人間による確定が完了したかどうか */
+  isHumanConfirmed?: boolean;
+
+  /** 人間確定日時 */
+  confirmedAt?: FirebaseFirestore.Timestamp | Date;
+}
+
+/**
+ * 訂正ログ（corrections コレクション用）
+ * AIの抽出結果と人間の確定値の差分を記録
+ */
+export interface CorrectionLog {
+  /** ドキュメントID（ocr_historyのID） */
+  docId: string;
+
+  /** テンプレートID（ocr_settingsのID） */
+  templateId: string;
+
+  /** フィールドキー（例: "invoiceDate" または "lineItems[0].itemName"） */
+  fieldKey: string;
+
+  /** AIが抽出した値 */
+  aiValue: string;
+
+  /** 人間が確定した値 */
+  humanValue: string;
+
+  /** AIの信頼度（0〜1.0） */
+  aiConfidence: number;
+
+  /** バウンディングボックス（あれば） */
+  bbox?: BBox;
+
+  /** ページ番号（複数ページ対応） */
+  page?: number;
+
+  /** 作成日時 */
+  createdAt: FirebaseFirestore.Timestamp | Date;
 }
 
 /**
