@@ -596,13 +596,13 @@ export default function HistoryPage() {
       )}
 
       <div className="rounded-lg border border-gray-200 bg-white shadow-sm">
-        <table className="w-full">
+        <table className="w-full table-fixed">
           <thead>
             <tr className="border-b">
-              <th className="p-3 text-left text-sm font-semibold text-gray-600 w-24">ステータス</th>
-              <th className="p-3 text-left text-sm font-semibold text-gray-600">ファイル名</th>
-              <th className="p-3 text-left text-sm font-semibold text-gray-600 w-48">OCR設定名</th>
-              <th className="p-3 text-left text-sm font-semibold text-gray-600 w-44">実行日時</th>
+              <th className="p-3 text-left text-sm font-semibold text-gray-600" style={{ width: '90px' }}>ステータス</th>
+              <th className="p-3 text-left text-sm font-semibold text-gray-600" style={{ width: '35%' }}>ファイル名</th>
+              <th className="p-3 text-left text-sm font-semibold text-gray-600" style={{ width: '30%' }}>OCR設定名</th>
+              <th className="p-3 text-left text-sm font-semibold text-gray-600" style={{ width: '160px' }}>実行日時</th>
             </tr>
           </thead>
           <tbody>
