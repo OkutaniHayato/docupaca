@@ -282,3 +282,26 @@ export function isExtractedArrayData(data: ExtractedValue | ExtractedArrayData |
 export function isExtractedValue(data: ExtractedValue | ExtractedArrayData | null | undefined): data is ExtractedValue {
   return !!data && typeof data === 'object' && 'value' in data && typeof data.value === 'string';
 }
+
+/**
+ * 訂正学習バッチの設定（app_settings/correction_learning）
+ */
+export interface CorrectionLearningSettings {
+  /** バッチ処理の有効/無効 */
+  enabled: boolean;
+
+  /** 実行時刻（0-23の整数、JST） */
+  scheduledHour: number;
+
+  /** 対象日数（過去何日分の訂正を集計するか） */
+  lookbackDays: number;
+
+  /** 最低発生回数（何回以上の訂正で学習するか） */
+  minOccurrenceCount: number;
+
+  /** 最終更新日時 */
+  updatedAt: FirebaseFirestore.Timestamp | Date;
+
+  /** 更新者UID */
+  updatedBy?: string;
+}

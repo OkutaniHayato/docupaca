@@ -796,6 +796,26 @@ interface CorrectionAggregation extends CorrectionAggregationKey {
 }
 
 /**
+ * 訂正学習バッチの設定（app_settings/correction_learning）
+ */
+interface CorrectionLearningSettings {
+  enabled: boolean;
+  scheduledHour: number;
+  lookbackDays: number;
+  minOccurrenceCount: number;
+  updatedAt: admin.firestore.Timestamp;
+  updatedBy?: string;
+}
+
+// デフォルト設定
+const DEFAULT_LEARNING_SETTINGS: Omit<CorrectionLearningSettings, 'updatedAt' | 'updatedBy'> = {
+  enabled: true,
+  scheduledHour: 3,
+  lookbackDays: 30,
+  minOccurrenceCount: 3,
+};
+
+/**
  * 訂正学習バッチ処理
  * 毎日1回実行し、corrections から学習ルールを生成・更新
  *
@@ -807,19 +827,40 @@ interface CorrectionAggregation extends CorrectionAggregationKey {
  */
 export const learnFromCorrections = functions.scheduler.onSchedule(
   {
-    schedule: '0 3 * * *', // 毎日午前3時（JST）に実行
+    schedule: '0 * * * *', // 毎時0分に実行（設定された時刻かどうかを内部で判定）
     timeZone: 'Asia/Tokyo',
     region: 'asia-northeast1',
     timeoutSeconds: 540,
     memory: '512MiB',
   },
   async () => {
-    const LOOKBACK_DAYS = 30; // 過去30日分を対象
-    const MIN_OCCURRENCE_COUNT = 3; // 最低3回以上の訂正パターンを学習
+    // 設定を取得
+    const settingsDoc = await db.collection('app_settings').doc('correction_learning').get();
+    const settings: CorrectionLearningSettings = settingsDoc.exists
+      ? (settingsDoc.data() as CorrectionLearningSettings)
+      : { ...DEFAULT_LEARNING_SETTINGS, updatedAt: admin.firestore.Timestamp.now() };
+
+    // 無効の場合はスキップ
+    if (!settings.enabled) {
+      functions.logger.info('訂正学習バッチは無効に設定されています');
+      return;
+    }
+
+    // 現在時刻が設定された実行時刻かどうかを確認（JST）
+    const now = new Date();
+    const jstHour = (now.getUTCHours() + 9) % 24; // UTC -> JST
+    if (jstHour !== settings.scheduledHour) {
+      functions.logger.info(`現在時刻(${jstHour}時)は実行時刻(${settings.scheduledHour}時)ではありません`);
+      return;
+    }
+
+    const LOOKBACK_DAYS = settings.lookbackDays;
+    const MIN_OCCURRENCE_COUNT = settings.minOccurrenceCount;
 
     functions.logger.info('訂正学習バッチ開始', {
       lookbackDays: LOOKBACK_DAYS,
       minOccurrenceCount: MIN_OCCURRENCE_COUNT,
+      scheduledHour: settings.scheduledHour,
     });
 
     const startTime = Date.now();
