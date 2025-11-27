@@ -200,6 +200,7 @@ export default function LearningSettingsPage() {
   const [loading, setLoading] = useState(true);
   const [loadingHistory, setLoadingHistory] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [executing, setExecuting] = useState(false);
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
   // 設定を取得
@@ -230,29 +231,79 @@ export default function LearningSettingsPage() {
   }, []);
 
   // 履歴を取得
-  useEffect(() => {
-    const fetchHistories = async () => {
-      try {
-        const q = query(
-          collection(db, 'learning_history'),
-          orderBy('executedAt', 'desc'),
-          limit(20)
-        );
-        const snapshot = await getDocs(q);
-        const historyData = snapshot.docs.map(doc => ({
-          id: doc.id,
-          data: doc.data() as LearningHistory,
-        }));
-        setHistories(historyData);
-      } catch (error) {
-        console.error('履歴の取得に失敗:', error);
-      } finally {
-        setLoadingHistory(false);
-      }
-    };
+  const fetchHistories = async () => {
+    try {
+      const q = query(
+        collection(db, 'learning_history'),
+        orderBy('executedAt', 'desc'),
+        limit(20)
+      );
+      const snapshot = await getDocs(q);
+      const historyData = snapshot.docs.map(doc => ({
+        id: doc.id,
+        data: doc.data() as LearningHistory,
+      }));
+      setHistories(historyData);
+    } catch (error) {
+      console.error('履歴の取得に失敗:', error);
+    } finally {
+      setLoadingHistory(false);
+    }
+  };
 
+  useEffect(() => {
     fetchHistories();
   }, []);
+
+  // 手動実行
+  const handleManualExecution = async () => {
+    if (!currentUser) return;
+
+    setExecuting(true);
+    setMessage(null);
+
+    try {
+      // Firebase Cloud Functions のURLを構築
+      const projectId = process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID;
+      const functionUrl = `https://us-central1-${projectId}.cloudfunctions.net/runCorrectionLearning`;
+
+      const token = await currentUser.getIdToken();
+      const response = await fetch(functionUrl, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+      });
+
+      if (!response.ok) {
+        throw new Error('学習バッチの実行に失敗しました');
+      }
+
+      const result = await response.json();
+
+      if (result.success) {
+        setMessage({
+          type: 'success',
+          text: `学習バッチを実行しました（${result.rulesAdded}件追加、${result.rulesUpdated}件更新）`,
+        });
+        // 履歴を再取得
+        await fetchHistories();
+      } else {
+        setMessage({
+          type: 'error',
+          text: result.message || '学習バッチの実行に失敗しました',
+        });
+      }
+
+      setTimeout(() => setMessage(null), 5000);
+    } catch (error) {
+      console.error('手動実行に失敗:', error);
+      setMessage({ type: 'error', text: '学習バッチの実行に失敗しました' });
+    } finally {
+      setExecuting(false);
+    }
+  };
 
   // 設定を保存
   const handleSave = async () => {
@@ -370,7 +421,7 @@ export default function LearningSettingsPage() {
               value={settings.scheduledHour}
               onChange={(e) => setSettings({ ...settings, scheduledHour: parseInt(e.target.value) })}
               disabled={!settings.enabled}
-              className="w-full rounded-lg border border-gray-300 px-4 py-2 focus:border-green-500 focus:outline-none focus:ring-1 focus:ring-green-500 disabled:bg-gray-100 disabled:text-gray-500"
+              className="w-full rounded-lg border border-gray-300 px-4 py-2 text-gray-900 focus:border-green-500 focus:outline-none focus:ring-1 focus:ring-green-500 disabled:bg-gray-100 disabled:text-gray-700"
             >
               {Array.from({ length: 24 }, (_, i) => (
                 <option key={i} value={i}>
@@ -400,7 +451,7 @@ export default function LearningSettingsPage() {
                 disabled={!settings.enabled}
                 min={1}
                 max={365}
-                className="w-24 rounded-lg border border-gray-300 px-4 py-2 text-center focus:border-green-500 focus:outline-none focus:ring-1 focus:ring-green-500 disabled:bg-gray-100 disabled:text-gray-500"
+                className="w-24 rounded-lg border border-gray-300 px-4 py-2 text-center text-gray-900 focus:border-green-500 focus:outline-none focus:ring-1 focus:ring-green-500 disabled:bg-gray-100 disabled:text-gray-700"
               />
               <span className="text-gray-700">日間</span>
             </div>
@@ -426,7 +477,7 @@ export default function LearningSettingsPage() {
                 disabled={!settings.enabled}
                 min={1}
                 max={100}
-                className="w-24 rounded-lg border border-gray-300 px-4 py-2 text-center focus:border-green-500 focus:outline-none focus:ring-1 focus:ring-green-500 disabled:bg-gray-100 disabled:text-gray-500"
+                className="w-24 rounded-lg border border-gray-300 px-4 py-2 text-center text-gray-900 focus:border-green-500 focus:outline-none focus:ring-1 focus:ring-green-500 disabled:bg-gray-100 disabled:text-gray-700"
               />
               <span className="text-gray-700">回以上</span>
             </div>
@@ -474,9 +525,23 @@ export default function LearningSettingsPage() {
 
       {/* 学習履歴セクション */}
       <div className="rounded-lg border bg-white p-6 shadow-sm">
-        <div className="flex items-center space-x-3 mb-4">
-          <History className="h-6 w-6 text-green-600" />
-          <h2 className="text-xl font-bold text-gray-900">学習履歴</h2>
+        <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center space-x-3">
+            <History className="h-6 w-6 text-green-600" />
+            <h2 className="text-xl font-bold text-gray-900">学習履歴</h2>
+          </div>
+          <button
+            onClick={handleManualExecution}
+            disabled={executing}
+            className="flex items-center rounded-lg bg-purple-600 px-4 py-2 text-white transition hover:bg-purple-700 disabled:bg-gray-400"
+          >
+            {executing ? (
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+            ) : (
+              <PlayCircle className="mr-2 h-4 w-4" />
+            )}
+            {executing ? '実行中...' : '手動実行'}
+          </button>
         </div>
 
         {loadingHistory ? (
