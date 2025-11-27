@@ -102,6 +102,11 @@ export interface OcrSetting {
 
   /** テンプレート判定用キーワード（タイトル、固定ラベルなど） */
   exampleKeywords?: string[];
+
+  // === 訂正学習データ（機能③） ===
+
+  /** 学習データ（訂正ログから自動生成） */
+  learning?: LearningData;
 }
 
 /**
@@ -170,6 +175,65 @@ export interface OcrHistory {
 
   /** 人間確定日時 */
   confirmedAt?: FirebaseFirestore.Timestamp | Date;
+}
+
+/**
+ * 置換ルール（訂正学習から生成）
+ * AIの抽出ミスを自動補正するためのルール
+ */
+export interface ReplacementRule {
+  /** フィールドキー（例: "invoiceDate"） */
+  fieldKey: string;
+
+  /** AIが抽出した値（補正前） */
+  aiValue: string;
+
+  /** 正しい値（補正後） */
+  correctValue: string;
+
+  /** この訂正が発生した回数 */
+  count: number;
+
+  /** 最終更新日時 */
+  updatedAt: FirebaseFirestore.Timestamp | Date;
+}
+
+/**
+ * 位置ヒント（訂正学習から生成）
+ * 特定フィールドの推奨抽出領域
+ */
+export interface PreferredRegion {
+  /** フィールドキー */
+  fieldKey: string;
+
+  /** 推奨領域（正規化座標） */
+  region: {
+    x: number;
+    y: number;
+    w: number;
+    h: number;
+  };
+
+  /** サンプル数（この領域を計算するのに使用した訂正数） */
+  sampleCount: number;
+
+  /** 最終更新日時 */
+  updatedAt: FirebaseFirestore.Timestamp | Date;
+}
+
+/**
+ * 学習データ（テンプレートに蓄積）
+ * 訂正ログから自動生成される補正ルール
+ */
+export interface LearningData {
+  /** 置換ルール配列 */
+  replacements: ReplacementRule[];
+
+  /** 位置ヒント配列（オプション） */
+  preferredRegions?: PreferredRegion[];
+
+  /** 最終学習実行日時 */
+  lastLearnedAt?: FirebaseFirestore.Timestamp | Date;
 }
 
 /**

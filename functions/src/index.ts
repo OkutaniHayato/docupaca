@@ -728,6 +728,528 @@ ${jsonSchemaExample}
  * - 成功: { success: true, history_id: string, extracted_data: object }
  * - エラー: { success: false, error: string }
  */
+// =====================================================
+// 訂正学習バッチ処理（機能③）
+// =====================================================
+
+/**
+ * 置換ルールの型定義
+ */
+interface ReplacementRule {
+  fieldKey: string;
+  aiValue: string;
+  correctValue: string;
+  count: number;
+  updatedAt: admin.firestore.Timestamp;
+}
+
+/**
+ * 位置ヒントの型定義
+ */
+interface PreferredRegion {
+  fieldKey: string;
+  region: { x: number; y: number; w: number; h: number };
+  sampleCount: number;
+  updatedAt: admin.firestore.Timestamp;
+}
+
+/**
+ * 学習データの型定義
+ */
+interface LearningData {
+  replacements: ReplacementRule[];
+  preferredRegions?: PreferredRegion[];
+  lastLearnedAt?: admin.firestore.Timestamp;
+}
+
+/**
+ * 訂正ログの型定義（集計用）
+ */
+interface CorrectionLog {
+  docId: string;
+  templateId: string;
+  fieldKey: string;
+  aiValue: string;
+  humanValue: string;
+  aiConfidence: number;
+  bbox?: BBox;
+  page?: number;
+  createdAt: admin.firestore.Timestamp;
+}
+
+/**
+ * 集計キーの型
+ */
+interface CorrectionAggregationKey {
+  templateId: string;
+  fieldKey: string;
+  aiValue: string;
+  humanValue: string;
+}
+
+/**
+ * 集計結果の型
+ */
+interface CorrectionAggregation extends CorrectionAggregationKey {
+  count: number;
+  bboxes: Array<{ bbox: BBox; page?: number }>;
+}
+
+/**
+ * 訂正学習バッチ処理
+ * 毎日1回実行し、corrections から学習ルールを生成・更新
+ *
+ * 処理内容:
+ * 1. 過去 N 日分の corrections を取得
+ * 2. templateId + fieldKey + aiValue + humanValue で集計
+ * 3. 同じ組み合わせが 3回以上 出ているものを抽出
+ * 4. learning.replacements に追記/更新
+ */
+export const learnFromCorrections = functions.scheduler.onSchedule(
+  {
+    schedule: '0 3 * * *', // 毎日午前3時（JST）に実行
+    timeZone: 'Asia/Tokyo',
+    region: 'asia-northeast1',
+    timeoutSeconds: 540,
+    memory: '512MiB',
+  },
+  async () => {
+    const LOOKBACK_DAYS = 30; // 過去30日分を対象
+    const MIN_OCCURRENCE_COUNT = 3; // 最低3回以上の訂正パターンを学習
+
+    functions.logger.info('訂正学習バッチ開始', {
+      lookbackDays: LOOKBACK_DAYS,
+      minOccurrenceCount: MIN_OCCURRENCE_COUNT,
+    });
+
+    const startTime = Date.now();
+    const stats = {
+      totalCorrections: 0,
+      templatesProcessed: 0,
+      rulesAdded: 0,
+      rulesUpdated: 0,
+      errors: 0,
+    };
+
+    try {
+      // 1. 過去 N 日分の corrections を取得
+      const cutoffDate = new Date();
+      cutoffDate.setDate(cutoffDate.getDate() - LOOKBACK_DAYS);
+      const cutoffTimestamp = admin.firestore.Timestamp.fromDate(cutoffDate);
+
+      functions.logger.info(`${LOOKBACK_DAYS}日前以降の訂正を取得中...`, {
+        cutoffDate: cutoffDate.toISOString(),
+      });
+
+      const correctionsSnapshot = await db.collection('corrections')
+        .where('createdAt', '>=', cutoffTimestamp)
+        .get();
+
+      stats.totalCorrections = correctionsSnapshot.size;
+      functions.logger.info(`取得した訂正数: ${stats.totalCorrections}`);
+
+      if (correctionsSnapshot.empty) {
+        functions.logger.info('処理対象の訂正がありません');
+        return;
+      }
+
+      // 2. templateId + fieldKey + aiValue + humanValue で集計
+      const aggregations = new Map<string, CorrectionAggregation>();
+
+      correctionsSnapshot.docs.forEach((doc) => {
+        const correction = doc.data() as CorrectionLog;
+
+        // aiValue と humanValue が同じ場合（訂正なし）はスキップ
+        if (correction.aiValue === correction.humanValue) {
+          return;
+        }
+
+        const key = JSON.stringify({
+          templateId: correction.templateId,
+          fieldKey: correction.fieldKey,
+          aiValue: correction.aiValue,
+          humanValue: correction.humanValue,
+        });
+
+        const existing = aggregations.get(key);
+        if (existing) {
+          existing.count++;
+          if (correction.bbox) {
+            existing.bboxes.push({ bbox: correction.bbox, page: correction.page });
+          }
+        } else {
+          aggregations.set(key, {
+            templateId: correction.templateId,
+            fieldKey: correction.fieldKey,
+            aiValue: correction.aiValue,
+            humanValue: correction.humanValue,
+            count: 1,
+            bboxes: correction.bbox ? [{ bbox: correction.bbox, page: correction.page }] : [],
+          });
+        }
+      });
+
+      // 3. 3回以上の訂正パターンを抽出し、テンプレートごとにグループ化
+      const templateUpdates = new Map<string, CorrectionAggregation[]>();
+
+      aggregations.forEach((agg) => {
+        if (agg.count >= MIN_OCCURRENCE_COUNT) {
+          const existing = templateUpdates.get(agg.templateId) || [];
+          existing.push(agg);
+          templateUpdates.set(agg.templateId, existing);
+        }
+      });
+
+      functions.logger.info(`学習対象テンプレート数: ${templateUpdates.size}`);
+
+      // 4. 各テンプレートの learning.replacements を更新
+      const batch = db.batch();
+      let batchCount = 0;
+      const MAX_BATCH_SIZE = 500;
+
+      for (const [templateId, corrections] of templateUpdates.entries()) {
+        try {
+          // テンプレートドキュメントを取得
+          const templateRef = db.collection('ocr_settings').doc(templateId);
+          const templateDoc = await templateRef.get();
+
+          if (!templateDoc.exists) {
+            functions.logger.warn(`テンプレートが見つかりません: ${templateId}`);
+            continue;
+          }
+
+          const templateData = templateDoc.data() as { learning?: LearningData };
+          const existingLearning: LearningData = templateData.learning || {
+            replacements: [],
+          };
+
+          // 既存の replacements をMapに変換（検索を高速化）
+          const existingReplacements = new Map<string, ReplacementRule>();
+          existingLearning.replacements.forEach((rule) => {
+            const key = `${rule.fieldKey}|${rule.aiValue}|${rule.correctValue}`;
+            existingReplacements.set(key, rule);
+          });
+
+          // 新しい訂正パターンを追加/更新
+          corrections.forEach((correction) => {
+            const key = `${correction.fieldKey}|${correction.aiValue}|${correction.humanValue}`;
+            const existing = existingReplacements.get(key);
+
+            if (existing) {
+              // 既存ルールの count を加算
+              existing.count += correction.count;
+              existing.updatedAt = admin.firestore.Timestamp.now();
+              stats.rulesUpdated++;
+            } else {
+              // 新規ルールを追加
+              existingReplacements.set(key, {
+                fieldKey: correction.fieldKey,
+                aiValue: correction.aiValue,
+                correctValue: correction.humanValue,
+                count: correction.count,
+                updatedAt: admin.firestore.Timestamp.now(),
+              });
+              stats.rulesAdded++;
+            }
+          });
+
+          // 更新データを準備
+          const updatedLearning: LearningData = {
+            replacements: Array.from(existingReplacements.values()),
+            preferredRegions: existingLearning.preferredRegions,
+            lastLearnedAt: admin.firestore.Timestamp.now(),
+          };
+
+          batch.update(templateRef, { learning: updatedLearning });
+          batchCount++;
+          stats.templatesProcessed++;
+
+          // バッチサイズ制限に達したらコミット
+          if (batchCount >= MAX_BATCH_SIZE) {
+            await batch.commit();
+            functions.logger.info(`バッチコミット完了: ${batchCount}件`);
+            batchCount = 0;
+          }
+        } catch (error) {
+          functions.logger.error(`テンプレート更新エラー: ${templateId}`, error);
+          stats.errors++;
+        }
+      }
+
+      // 残りのバッチをコミット
+      if (batchCount > 0) {
+        await batch.commit();
+        functions.logger.info(`最終バッチコミット完了: ${batchCount}件`);
+      }
+
+      const duration = Date.now() - startTime;
+
+      functions.logger.info('訂正学習バッチ完了', {
+        duration: `${duration}ms`,
+        stats,
+      });
+    } catch (error) {
+      functions.logger.error('訂正学習バッチエラー', error);
+      throw error;
+    }
+  }
+);
+
+/**
+ * 手動で訂正学習バッチを実行するためのHTTPエンドポイント
+ * 開発・テスト用
+ *
+ * リクエスト:
+ * - Headers: Authorization: Bearer <API_KEY>
+ * - Query Parameters:
+ *   - lookbackDays: 過去何日分を対象にするか（デフォルト: 30）
+ *   - minCount: 最低何回の訂正で学習するか（デフォルト: 3）
+ *   - dryRun: true の場合、実際の更新は行わない（デフォルト: false）
+ */
+export const runCorrectionLearning = functions.https.onRequest(
+  {
+    region: 'asia-northeast1',
+    timeoutSeconds: 540,
+    memory: '512MiB',
+  },
+  async (req, res) => {
+    // CORSヘッダーを設定
+    res.set('Access-Control-Allow-Origin', '*');
+    res.set('Access-Control-Allow-Methods', 'POST, OPTIONS');
+    res.set('Access-Control-Allow-Headers', 'Authorization, Content-Type');
+
+    if (req.method === 'OPTIONS') {
+      res.status(204).send('');
+      return;
+    }
+
+    if (req.method !== 'POST') {
+      res.status(405).json({ success: false, error: 'Method not allowed. Use POST.' });
+      return;
+    }
+
+    // 認証チェック
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      res.status(401).json({ success: false, error: 'Authorization header missing or invalid' });
+      return;
+    }
+
+    const apiKey = authHeader.substring(7);
+    const userId = await verifyApiKey(apiKey);
+
+    if (!userId) {
+      res.status(401).json({ success: false, error: 'Invalid API key' });
+      return;
+    }
+
+    // パラメータ取得
+    const lookbackDays = parseInt(req.query.lookbackDays as string) || 30;
+    const minCount = parseInt(req.query.minCount as string) || 3;
+    const dryRun = req.query.dryRun === 'true';
+
+    functions.logger.info('手動訂正学習バッチ開始', {
+      userId,
+      lookbackDays,
+      minCount,
+      dryRun,
+    });
+
+    const startTime = Date.now();
+    const stats = {
+      totalCorrections: 0,
+      templatesProcessed: 0,
+      rulesAdded: 0,
+      rulesUpdated: 0,
+      errors: 0,
+    };
+
+    try {
+      // 過去 N 日分の corrections を取得
+      const cutoffDate = new Date();
+      cutoffDate.setDate(cutoffDate.getDate() - lookbackDays);
+      const cutoffTimestamp = admin.firestore.Timestamp.fromDate(cutoffDate);
+
+      const correctionsSnapshot = await db.collection('corrections')
+        .where('createdAt', '>=', cutoffTimestamp)
+        .get();
+
+      stats.totalCorrections = correctionsSnapshot.size;
+
+      if (correctionsSnapshot.empty) {
+        res.status(200).json({
+          success: true,
+          message: '処理対象の訂正がありません',
+          stats,
+          dryRun,
+        });
+        return;
+      }
+
+      // 集計処理
+      const aggregations = new Map<string, CorrectionAggregation>();
+
+      correctionsSnapshot.docs.forEach((doc) => {
+        const correction = doc.data() as CorrectionLog;
+
+        if (correction.aiValue === correction.humanValue) {
+          return;
+        }
+
+        const key = JSON.stringify({
+          templateId: correction.templateId,
+          fieldKey: correction.fieldKey,
+          aiValue: correction.aiValue,
+          humanValue: correction.humanValue,
+        });
+
+        const existing = aggregations.get(key);
+        if (existing) {
+          existing.count++;
+          if (correction.bbox) {
+            existing.bboxes.push({ bbox: correction.bbox, page: correction.page });
+          }
+        } else {
+          aggregations.set(key, {
+            templateId: correction.templateId,
+            fieldKey: correction.fieldKey,
+            aiValue: correction.aiValue,
+            humanValue: correction.humanValue,
+            count: 1,
+            bboxes: correction.bbox ? [{ bbox: correction.bbox, page: correction.page }] : [],
+          });
+        }
+      });
+
+      // テンプレートごとにグループ化
+      const templateUpdates = new Map<string, CorrectionAggregation[]>();
+      const learningCandidates: Array<{
+        templateId: string;
+        fieldKey: string;
+        aiValue: string;
+        correctValue: string;
+        count: number;
+      }> = [];
+
+      aggregations.forEach((agg) => {
+        if (agg.count >= minCount) {
+          const existing = templateUpdates.get(agg.templateId) || [];
+          existing.push(agg);
+          templateUpdates.set(agg.templateId, existing);
+
+          learningCandidates.push({
+            templateId: agg.templateId,
+            fieldKey: agg.fieldKey,
+            aiValue: agg.aiValue,
+            correctValue: agg.humanValue,
+            count: agg.count,
+          });
+        }
+      });
+
+      // dryRun の場合は更新せずに結果を返す
+      if (dryRun) {
+        res.status(200).json({
+          success: true,
+          message: 'Dry run completed',
+          stats: {
+            ...stats,
+            templatesProcessed: templateUpdates.size,
+            rulesAdded: learningCandidates.length,
+          },
+          learningCandidates,
+          dryRun: true,
+        });
+        return;
+      }
+
+      // テンプレート更新
+      const batch = db.batch();
+      let batchCount = 0;
+
+      for (const [templateId, corrections] of templateUpdates.entries()) {
+        try {
+          const templateRef = db.collection('ocr_settings').doc(templateId);
+          const templateDoc = await templateRef.get();
+
+          if (!templateDoc.exists) {
+            functions.logger.warn(`テンプレートが見つかりません: ${templateId}`);
+            continue;
+          }
+
+          const templateData = templateDoc.data() as { learning?: LearningData };
+          const existingLearning: LearningData = templateData.learning || {
+            replacements: [],
+          };
+
+          const existingReplacements = new Map<string, ReplacementRule>();
+          existingLearning.replacements.forEach((rule) => {
+            const key = `${rule.fieldKey}|${rule.aiValue}|${rule.correctValue}`;
+            existingReplacements.set(key, rule);
+          });
+
+          corrections.forEach((correction) => {
+            const key = `${correction.fieldKey}|${correction.aiValue}|${correction.humanValue}`;
+            const existing = existingReplacements.get(key);
+
+            if (existing) {
+              existing.count += correction.count;
+              existing.updatedAt = admin.firestore.Timestamp.now();
+              stats.rulesUpdated++;
+            } else {
+              existingReplacements.set(key, {
+                fieldKey: correction.fieldKey,
+                aiValue: correction.aiValue,
+                correctValue: correction.humanValue,
+                count: correction.count,
+                updatedAt: admin.firestore.Timestamp.now(),
+              });
+              stats.rulesAdded++;
+            }
+          });
+
+          const updatedLearning: LearningData = {
+            replacements: Array.from(existingReplacements.values()),
+            preferredRegions: existingLearning.preferredRegions,
+            lastLearnedAt: admin.firestore.Timestamp.now(),
+          };
+
+          batch.update(templateRef, { learning: updatedLearning });
+          batchCount++;
+          stats.templatesProcessed++;
+        } catch (error) {
+          functions.logger.error(`テンプレート更新エラー: ${templateId}`, error);
+          stats.errors++;
+        }
+      }
+
+      if (batchCount > 0) {
+        await batch.commit();
+      }
+
+      const duration = Date.now() - startTime;
+
+      res.status(200).json({
+        success: true,
+        message: '訂正学習バッチ完了',
+        duration: `${duration}ms`,
+        stats,
+        dryRun: false,
+      });
+    } catch (error) {
+      functions.logger.error('手動訂正学習バッチエラー', error);
+      res.status(500).json({
+        success: false,
+        error: error instanceof Error ? error.message : 'Internal server error',
+      });
+    }
+  }
+);
+
+// =====================================================
+// 外部API連携
+// =====================================================
+
 export const ocrApi = functions.https.onRequest(
   {
     region: 'asia-northeast1',
