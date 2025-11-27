@@ -305,3 +305,49 @@ export interface CorrectionLearningSettings {
   /** 更新者UID */
   updatedBy?: string;
 }
+
+/**
+ * 学習履歴の学習ルール詳細
+ */
+export interface LearningHistoryRule {
+  templateId: string;
+  templateName?: string;
+  fieldKey: string;
+  aiValue: string;
+  correctValue: string;
+  count: number;
+  isNew: boolean; // 新規追加かどうか
+}
+
+/**
+ * 学習履歴（learning_history コレクション）
+ * バッチ実行ごとに1レコード作成
+ */
+export interface LearningHistory {
+  /** 実行日時 */
+  executedAt: FirebaseFirestore.Timestamp | Date;
+
+  /** 実行タイプ（scheduled: スケジュール実行, manual: 手動実行） */
+  executionType: 'scheduled' | 'manual';
+
+  /** 処理統計 */
+  stats: {
+    totalCorrections: number;
+    templatesProcessed: number;
+    rulesAdded: number;
+    rulesUpdated: number;
+    errors: number;
+  };
+
+  /** 処理時間（ミリ秒） */
+  durationMs: number;
+
+  /** 学習ルール詳細 */
+  rules: LearningHistoryRule[];
+
+  /** 設定パラメータ */
+  settings: {
+    lookbackDays: number;
+    minOccurrenceCount: number;
+  };
+}

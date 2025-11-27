@@ -816,6 +816,40 @@ const DEFAULT_LEARNING_SETTINGS: Omit<CorrectionLearningSettings, 'updatedAt' | 
 };
 
 /**
+ * 学習履歴のルール詳細
+ */
+interface LearningHistoryRule {
+  templateId: string;
+  templateName?: string;
+  fieldKey: string;
+  aiValue: string;
+  correctValue: string;
+  count: number;
+  isNew: boolean;
+}
+
+/**
+ * 学習履歴（learning_history コレクション）
+ */
+interface LearningHistory {
+  executedAt: admin.firestore.Timestamp;
+  executionType: 'scheduled' | 'manual';
+  stats: {
+    totalCorrections: number;
+    templatesProcessed: number;
+    rulesAdded: number;
+    rulesUpdated: number;
+    errors: number;
+  };
+  durationMs: number;
+  rules: LearningHistoryRule[];
+  settings: {
+    lookbackDays: number;
+    minOccurrenceCount: number;
+  };
+}
+
+/**
  * 訂正学習バッチ処理
  * 毎日1回実行し、corrections から学習ルールを生成・更新
  *
@@ -947,6 +981,7 @@ export const learnFromCorrections = functions.scheduler.onSchedule(
       const batch = db.batch();
       let batchCount = 0;
       const MAX_BATCH_SIZE = 500;
+      const historyRules: LearningHistoryRule[] = [];
 
       for (const [templateId, corrections] of templateUpdates.entries()) {
         try {
@@ -959,7 +994,8 @@ export const learnFromCorrections = functions.scheduler.onSchedule(
             continue;
           }
 
-          const templateData = templateDoc.data() as { learning?: LearningData };
+          const templateData = templateDoc.data() as { name?: string; learning?: LearningData };
+          const templateName = templateData.name || templateId;
           const existingLearning: LearningData = templateData.learning || {
             replacements: [],
           };
@@ -975,6 +1011,7 @@ export const learnFromCorrections = functions.scheduler.onSchedule(
           corrections.forEach((correction) => {
             const key = `${correction.fieldKey}|${correction.aiValue}|${correction.humanValue}`;
             const existing = existingReplacements.get(key);
+            const isNew = !existing;
 
             if (existing) {
               // 既存ルールの count を加算
@@ -992,6 +1029,17 @@ export const learnFromCorrections = functions.scheduler.onSchedule(
               });
               stats.rulesAdded++;
             }
+
+            // 履歴用にルール情報を記録
+            historyRules.push({
+              templateId,
+              templateName,
+              fieldKey: correction.fieldKey,
+              aiValue: correction.aiValue,
+              correctValue: correction.humanValue,
+              count: correction.count,
+              isNew,
+            });
           });
 
           // 更新データを準備
@@ -1024,6 +1072,24 @@ export const learnFromCorrections = functions.scheduler.onSchedule(
       }
 
       const duration = Date.now() - startTime;
+
+      // 5. 学習履歴を保存（ルールが追加/更新された場合のみ）
+      if (historyRules.length > 0) {
+        const history: LearningHistory = {
+          executedAt: admin.firestore.Timestamp.now(),
+          executionType: 'scheduled',
+          stats,
+          durationMs: duration,
+          rules: historyRules,
+          settings: {
+            lookbackDays: LOOKBACK_DAYS,
+            minOccurrenceCount: MIN_OCCURRENCE_COUNT,
+          },
+        };
+
+        await db.collection('learning_history').add(history);
+        functions.logger.info('学習履歴を保存しました');
+      }
 
       functions.logger.info('訂正学習バッチ完了', {
         duration: `${duration}ms`,
@@ -1207,6 +1273,7 @@ export const runCorrectionLearning = functions.https.onRequest(
       // テンプレート更新
       const batch = db.batch();
       let batchCount = 0;
+      const historyRules: LearningHistoryRule[] = [];
 
       for (const [templateId, corrections] of templateUpdates.entries()) {
         try {
@@ -1218,7 +1285,8 @@ export const runCorrectionLearning = functions.https.onRequest(
             continue;
           }
 
-          const templateData = templateDoc.data() as { learning?: LearningData };
+          const templateData = templateDoc.data() as { name?: string; learning?: LearningData };
+          const templateName = templateData.name || templateId;
           const existingLearning: LearningData = templateData.learning || {
             replacements: [],
           };
@@ -1232,6 +1300,7 @@ export const runCorrectionLearning = functions.https.onRequest(
           corrections.forEach((correction) => {
             const key = `${correction.fieldKey}|${correction.aiValue}|${correction.humanValue}`;
             const existing = existingReplacements.get(key);
+            const isNew = !existing;
 
             if (existing) {
               existing.count += correction.count;
@@ -1247,6 +1316,17 @@ export const runCorrectionLearning = functions.https.onRequest(
               });
               stats.rulesAdded++;
             }
+
+            // 履歴用にルール情報を記録
+            historyRules.push({
+              templateId,
+              templateName,
+              fieldKey: correction.fieldKey,
+              aiValue: correction.aiValue,
+              correctValue: correction.humanValue,
+              count: correction.count,
+              isNew,
+            });
           });
 
           const updatedLearning: LearningData = {
@@ -1269,6 +1349,24 @@ export const runCorrectionLearning = functions.https.onRequest(
       }
 
       const duration = Date.now() - startTime;
+
+      // 学習履歴を保存（ルールが追加/更新された場合のみ）
+      if (historyRules.length > 0) {
+        const history: LearningHistory = {
+          executedAt: admin.firestore.Timestamp.now(),
+          executionType: 'manual',
+          stats,
+          durationMs: duration,
+          rules: historyRules,
+          settings: {
+            lookbackDays,
+            minOccurrenceCount: minCount,
+          },
+        };
+
+        await db.collection('learning_history').add(history);
+        functions.logger.info('学習履歴を保存しました');
+      }
 
       res.status(200).json({
         success: true,
