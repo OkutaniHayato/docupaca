@@ -13,7 +13,10 @@ import {
 } from 'firebase/firestore';
 import { ref, uploadBytes } from 'firebase/storage';
 import { getFunctions, httpsCallable } from 'firebase/functions';
-import { Upload, X, Sparkles, AlertCircle, CheckCircle2 } from 'lucide-react';
+import { Upload, X, Sparkles, AlertCircle, CheckCircle2, Zap } from 'lucide-react';
+
+// 自動実行の信頼度閾値（90%以上で自動実行）
+const AUTO_EXECUTE_THRESHOLD = 0.9;
 
 // OCR履歴アイテムの型定義
 interface OcrHistoryItem {
@@ -65,6 +68,7 @@ export default function HistoryPage() {
   const [isDetecting, setIsDetecting] = useState(false);
   const [detectionResult, setDetectionResult] = useState<TemplateDetectionResult | null>(null);
   const [detectionError, setDetectionError] = useState<string>('');
+  const [isAutoExecuting, setIsAutoExecuting] = useState(false); // 自動実行中フラグ
 
   // 履歴リストを取得する関数
   const fetchHistoryList = useCallback(async () => {
@@ -181,6 +185,63 @@ export default function HistoryPage() {
     }
   };
 
+  // OCR実行処理（共通関数）
+  const executeOcrWithParams = async (file: File, settingId: string) => {
+    if (!currentUser) return;
+
+    try {
+      // 1. ファイルをCloud Storageにアップロード
+      const timestamp = Date.now();
+      const fileName = `${timestamp}_${file.name}`;
+      const storageRef = ref(storage, `ocr_executions/${currentUser.uid}/${fileName}`);
+
+      await uploadBytes(storageRef, file);
+      const filePath = `ocr_executions/${currentUser.uid}/${fileName}`;
+
+      // モーダルを閉じてテーブルでローディング表示
+      setIsExecuteModalOpen(false);
+      setSelectedFile(null);
+      setSelectedSettingId('');
+      setDetectionResult(null);
+      setDetectionError('');
+      setIsAutoExecuting(false);
+
+      // 一時的なアイテムを即座にUIに追加（楽観的更新）
+      const tempItem: OcrHistoryItem = {
+        id: `temp_${timestamp}`,
+        setting_id: settingId,
+        status: 'processing',
+        original_file_path: filePath,
+        executed_at: Timestamp.now(),
+      };
+
+      // 新しいアイテムを先頭に追加（降順ソートを維持）
+      setHistoryList(prev => [tempItem, ...prev]);
+
+      // 2. executeOcr Cloud Functionを呼び出し（バックグラウンド）
+      const functions = getFunctions(undefined, 'asia-northeast1');
+      const executeOcr = httpsCallable(functions, 'executeOcr');
+
+      // 非同期で実行（await しない）
+      executeOcr({
+        setting_id: settingId,
+        file_path: filePath,
+        user_id: currentUser.uid,
+      }).then(() => {
+        // 完了後に履歴を再取得（一時アイテムを実際のデータで置き換え）
+        fetchHistoryList();
+      }).catch((error) => {
+        console.error('Execute error:', error);
+        // エラー時も履歴を再取得
+        fetchHistoryList();
+      });
+    } catch (error) {
+      console.error('Execute error:', error);
+      setExecuteError(error instanceof Error ? error.message : '実行中にエラーが発生しました');
+      setIsAutoExecuting(false);
+    }
+  };
+
   // AIテンプレート判定
   const detectTemplate = async (file: File) => {
     if (ocrSettings.length === 0) return;
@@ -215,9 +276,21 @@ export default function HistoryPage() {
 
       if (result.success && result.data) {
         setDetectionResult(result.data);
-        // AI推定が成功した場合、推定されたテンプレートを自動選択
+
+        // AI推定が成功した場合
         if (result.data.predictedTemplateId) {
           setSelectedSettingId(result.data.predictedTemplateId);
+
+          // 信頼度が閾値以上なら自動実行
+          if (result.data.predictedConfidence >= AUTO_EXECUTE_THRESHOLD) {
+            setIsDetecting(false); // 判定完了
+            setIsAutoExecuting(true); // 自動実行開始
+            // 少し遅延を入れてUIを更新してから実行
+            setTimeout(() => {
+              executeOcrWithParams(file, result.data.predictedTemplateId);
+            }, 500);
+            return; // finallyをスキップ
+          }
         }
       }
     } catch (error) {
@@ -228,7 +301,7 @@ export default function HistoryPage() {
     }
   };
 
-  // 実行ハンドラー
+  // 実行ハンドラー（手動実行）
   const handleExecute = async () => {
     if (!currentUser) {
       setExecuteError('ユーザーが認証されていません');
@@ -246,59 +319,7 @@ export default function HistoryPage() {
     }
 
     setExecuteError('');
-
-    // モーダルを閉じる前に値をキャプチャ
-    const settingId = selectedSettingId;
-    const file = selectedFile;
-
-    try {
-      // 1. ファイルをCloud Storageにアップロード
-      const timestamp = Date.now();
-      const fileName = `${timestamp}_${file.name}`;
-      const storageRef = ref(storage, `ocr_executions/${currentUser.uid}/${fileName}`);
-
-      await uploadBytes(storageRef, file);
-      const filePath = `ocr_executions/${currentUser.uid}/${fileName}`;
-
-      // モーダルを閉じてテーブルでローディング表示
-      setIsExecuteModalOpen(false);
-      setSelectedFile(null);
-      setSelectedSettingId('');
-
-      // 一時的なアイテムを即座にUIに追加（楽観的更新）
-      const tempItem: OcrHistoryItem = {
-        id: `temp_${timestamp}`,
-        setting_id: settingId,
-        status: 'processing',
-        original_file_path: filePath,
-        executed_at: Timestamp.now(),
-      };
-
-      // 新しいアイテムを先頭に追加（降順ソートを維持）
-      setHistoryList(prev => [tempItem, ...prev]);
-
-      // 2. executeOcr Cloud Functionを呼び出し（バックグラウンド）
-      const functions = getFunctions(undefined, 'asia-northeast1');
-      const executeOcr = httpsCallable(functions, 'executeOcr');
-
-      // 非同期で実行（await しない）
-      executeOcr({
-        setting_id: settingId,
-        file_path: filePath,
-        user_id: currentUser.uid,
-      }).then(() => {
-        // 完了後に履歴を再取得（一時アイテムを実際のデータで置き換え）
-        fetchHistoryList();
-      }).catch((error) => {
-        console.error('Execute error:', error);
-        // エラー時も履歴を再取得
-        fetchHistoryList();
-      });
-
-    } catch (error) {
-      console.error('Execute error:', error);
-      setExecuteError(error instanceof Error ? error.message : '実行中にエラーが発生しました');
-    }
+    await executeOcrWithParams(selectedFile, selectedSettingId);
   };
 
   // ステータスチップの表示
@@ -359,6 +380,7 @@ export default function HistoryPage() {
               <h3 className="text-xl font-bold" style={{ color: '#000000' }}>帳票を実行</h3>
               <button
                 onClick={() => {
+                  if (isAutoExecuting) return; // 自動実行中は閉じない
                   setIsExecuteModalOpen(false);
                   setSelectedFile(null);
                   setSelectedSettingId('');
@@ -366,7 +388,8 @@ export default function HistoryPage() {
                   setDetectionResult(null);
                   setDetectionError('');
                 }}
-                className="text-gray-400 hover:text-gray-600"
+                className={`text-gray-400 hover:text-gray-600 ${isAutoExecuting ? 'opacity-50 cursor-not-allowed' : ''}`}
+                disabled={isAutoExecuting}
               >
                 <X className="h-6 w-6" />
               </button>
@@ -382,7 +405,7 @@ export default function HistoryPage() {
                   type="file"
                   accept=".pdf,.png,.jpg,.jpeg"
                   onChange={handleFileChange}
-                  disabled={isDetecting}
+                  disabled={isDetecting || isAutoExecuting}
                   className="w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-green-50 file:text-green-700 hover:file:bg-green-100 disabled:opacity-50"
                 />
                 {selectedFile && (
@@ -403,8 +426,23 @@ export default function HistoryPage() {
                 </div>
               )}
 
+              {/* 自動実行中の表示 */}
+              {isAutoExecuting && (
+                <div className="rounded-lg bg-green-100 border border-green-300 p-4 flex items-center gap-3">
+                  <Zap className="h-5 w-5 text-green-600 animate-pulse" />
+                  <div>
+                    <p className="text-sm font-medium text-green-800">
+                      高精度で判定完了！自動実行を開始します...
+                    </p>
+                    <p className="text-xs text-green-600">
+                      信頼度が{Math.round(AUTO_EXECUTE_THRESHOLD * 100)}%以上のため、自動でOCRを実行しています
+                    </p>
+                  </div>
+                </div>
+              )}
+
               {/* AI判定結果の表示 */}
-              {selectedFile && !isDetecting && detectionResult && (
+              {selectedFile && !isDetecting && !isAutoExecuting && detectionResult && (
                 <div className="rounded-lg border border-green-200 bg-green-50 p-4">
                   <div className="flex items-start gap-3">
                     <Sparkles className="h-5 w-5 text-green-600 flex-shrink-0 mt-0.5" />
@@ -496,7 +534,7 @@ export default function HistoryPage() {
                   onChange={(e) => setSelectedSettingId(e.target.value)}
                   className="w-full rounded-lg border border-gray-300 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-green-500"
                   style={{ color: '#000000' }}
-                  disabled={isDetecting}
+                  disabled={isDetecting || isAutoExecuting}
                 >
                   <option value="">設定を選択してください</option>
                   {ocrSettings.map((setting) => (
@@ -525,6 +563,7 @@ export default function HistoryPage() {
               <div className="flex gap-3 pt-4">
                 <button
                   onClick={() => {
+                    if (isAutoExecuting) return;
                     setIsExecuteModalOpen(false);
                     setSelectedFile(null);
                     setSelectedSettingId('');
@@ -532,14 +571,15 @@ export default function HistoryPage() {
                     setDetectionResult(null);
                     setDetectionError('');
                   }}
-                  className="flex-1 rounded-lg border border-gray-300 py-2 px-4 font-semibold text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-gray-500"
+                  className="flex-1 rounded-lg border border-gray-300 py-2 px-4 font-semibold text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-gray-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                  disabled={isAutoExecuting}
                 >
                   キャンセル
                 </button>
                 <button
                   onClick={handleExecute}
                   className="flex-1 rounded-lg bg-green-800 py-2 px-4 font-semibold text-white hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-500 disabled:opacity-50 disabled:cursor-not-allowed"
-                  disabled={!selectedSettingId || !selectedFile || isDetecting}
+                  disabled={!selectedSettingId || !selectedFile || isDetecting || isAutoExecuting}
                 >
                   実行
                 </button>
