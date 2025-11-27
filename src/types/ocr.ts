@@ -88,6 +88,28 @@ export interface OcrSetting {
 
   /** サンプルファイルパス（Cloud Storage） */
   sample_file_path?: string;
+
+  // === AI自動判定用メタ情報（後方互換性のためオプショナル） ===
+
+  /** UI表示名（設定名とは別にUIで表示する名前） */
+  displayName?: string;
+
+  /** テンプレートタイプ（請求書 / 見積書 / 注文書 など） */
+  templateType?: string;
+
+  /** テンプレート判定用キーワード（タイトル、固定ラベルなど） */
+  exampleKeywords?: string[];
+}
+
+/**
+ * テンプレート候補（AI判定結果）
+ */
+export interface TemplateCandidate {
+  /** テンプレートID（OcrSettingのドキュメントID） */
+  id: string;
+
+  /** 信頼度（0-1） */
+  confidence: number;
 }
 
 /**
@@ -120,6 +142,20 @@ export interface OcrHistory {
 
   /** 実行日時 */
   executed_at: FirebaseFirestore.Timestamp | Date;
+
+  // === AI自動判定関連（後方互換性のためオプショナル） ===
+
+  /** AI推定テンプレートID（nullは判定不能） */
+  predictedTemplateId?: string | null;
+
+  /** AI推定の信頼度（0-1） */
+  predictedConfidence?: number;
+
+  /** テンプレート候補一覧 */
+  templateCandidates?: TemplateCandidate[];
+
+  /** ユーザーが選択したテンプレートID（初期値はpredictedTemplateId） */
+  chosenTemplateId?: string;
 }
 
 /**

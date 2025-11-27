@@ -35,6 +35,10 @@ export interface OcrSettingFormData {
   prompt_text: string;
   extraction_fields: ExtractionField[];
   sample_file_path?: string; // Firebase Storageのファイルパス
+  // AI自動判定用メタ情報（オプショナル）
+  displayName?: string;
+  templateType?: string;
+  exampleKeywords?: string[];
 }
 
 // 後方互換性のため、ExtractionFieldを再エクスポート
@@ -486,6 +490,80 @@ export default function OcrSettingForm({
             <option value="gemini-2.5-flash">Gemini 2.5 Flash (高性能)</option>
             <option value="gemini-2.5-pro">Gemini 2.5 Pro (最高性能)</option>
           </select>
+        </div>
+      </div>
+
+      {/* --- AI自動判定用メタ情報 --- */}
+      <div className="p-6 bg-white border border-gray-200 rounded-lg shadow-sm">
+        <div className="flex items-center gap-2 mb-4">
+          <Sparkles className="h-5 w-5 text-green-600" />
+          <h3 className="text-lg font-medium text-gray-900">AI自動判定設定</h3>
+        </div>
+        <p className="text-sm text-gray-600 mb-4">
+          帳票アップロード時にAIが自動でテンプレートを判定するための設定です。設定すると、帳票を選んだ時にこのテンプレートが自動で推定されます。
+        </p>
+
+        {/* 表示名 */}
+        <div>
+          <label htmlFor="displayName" className="block text-sm font-medium text-gray-700">
+            表示名（オプション）
+          </label>
+          <input
+            type="text"
+            id="displayName"
+            value={formData.displayName || ''}
+            onChange={handleChange}
+            className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 text-gray-900 placeholder-gray-500 shadow-sm focus:border-green-500 focus:ring-2 focus:ring-green-500 disabled:opacity-50"
+            placeholder="UIに表示される名前（設定しない場合は設定名が使用されます）"
+            disabled={isLoading}
+          />
+        </div>
+
+        {/* テンプレートタイプ */}
+        <div className="mt-4">
+          <label htmlFor="templateType" className="block text-sm font-medium text-gray-700">
+            帳票タイプ（オプション）
+          </label>
+          <input
+            type="text"
+            id="templateType"
+            value={formData.templateType || ''}
+            onChange={handleChange}
+            className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 text-gray-900 placeholder-gray-500 shadow-sm focus:border-green-500 focus:ring-2 focus:ring-green-500 disabled:opacity-50"
+            placeholder="例: 請求書、見積書、注文書、納品書"
+            disabled={isLoading}
+          />
+          <p className="mt-1 text-xs text-gray-500">
+            帳票の種類を入力すると、AIがより正確に判定できます
+          </p>
+        </div>
+
+        {/* 判定キーワード */}
+        <div className="mt-4">
+          <label htmlFor="exampleKeywords" className="block text-sm font-medium text-gray-700">
+            判定キーワード（オプション）
+          </label>
+          <input
+            type="text"
+            id="exampleKeywords"
+            value={formData.exampleKeywords?.join(', ') || ''}
+            onChange={(e) => {
+              const keywords = e.target.value
+                .split(',')
+                .map(k => k.trim())
+                .filter(k => k.length > 0);
+              setFormData(prev => ({
+                ...prev,
+                exampleKeywords: keywords.length > 0 ? keywords : undefined
+              }));
+            }}
+            className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 text-gray-900 placeholder-gray-500 shadow-sm focus:border-green-500 focus:ring-2 focus:ring-green-500 disabled:opacity-50"
+            placeholder="例: 請求書, INVOICE, 御請求書, 株式会社ABC"
+            disabled={isLoading}
+          />
+          <p className="mt-1 text-xs text-gray-500">
+            帳票内に含まれる特徴的なキーワードをカンマ区切りで入力（タイトル、会社名、固定ラベルなど）
+          </p>
         </div>
       </div>
 

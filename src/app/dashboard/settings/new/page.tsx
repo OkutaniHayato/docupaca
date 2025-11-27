@@ -42,6 +42,10 @@ export default function NewOcrSettingPage() {
             prompt_text: data.prompt_text,
             extraction_fields: data.extraction_fields || [],
             sample_file_path: undefined, // 新しいファイルをアップロードさせるため
+            // AI自動判定用メタ情報もコピー
+            displayName: data.displayName,
+            templateType: data.templateType,
+            exampleKeywords: data.exampleKeywords,
           });
         } else {
           setError("テンプレートが見つかりませんでした。");
@@ -87,7 +91,7 @@ export default function NewOcrSettingPage() {
       }
 
       // Firestoreに保存
-      const settingData = {
+      const settingData: Record<string, unknown> = {
         name: data.name,
         owner_id: currentUser.uid,
         prompt_text: data.prompt_text,
@@ -96,6 +100,13 @@ export default function NewOcrSettingPage() {
         sample_file_path: sampleFilePath,
         created_at: serverTimestamp(),
       };
+
+      // AI自動判定用メタ情報（設定されている場合のみ追加）
+      if (data.displayName) settingData.displayName = data.displayName;
+      if (data.templateType) settingData.templateType = data.templateType;
+      if (data.exampleKeywords && data.exampleKeywords.length > 0) {
+        settingData.exampleKeywords = data.exampleKeywords;
+      }
 
       await addDoc(collection(db, "ocr_settings"), settingData);
 

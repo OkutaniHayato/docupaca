@@ -55,6 +55,10 @@ export default function EditOcrSettingPage() {
             prompt_text: data.prompt_text,
             extraction_fields: data.extraction_fields || [],
             sample_file_path: data.sample_file_path,
+            // AI自動判定用メタ情報
+            displayName: data.displayName,
+            templateType: data.templateType,
+            exampleKeywords: data.exampleKeywords,
           });
           
         } else {
@@ -104,13 +108,22 @@ export default function EditOcrSettingPage() {
       // Firestoreのドキュメントを更新
       const docRef = doc(db, "ocr_settings", settingId);
 
-      await updateDoc(docRef, {
+      const updateData: Record<string, unknown> = {
         name: data.name,
         model_name: data.model_name,
         prompt_text: data.prompt_text,
         extraction_fields: data.extraction_fields,
         sample_file_path: sampleFilePath,
-      });
+      };
+
+      // AI自動判定用メタ情報（空の場合はnullで上書き）
+      updateData.displayName = data.displayName || null;
+      updateData.templateType = data.templateType || null;
+      updateData.exampleKeywords = (data.exampleKeywords && data.exampleKeywords.length > 0)
+        ? data.exampleKeywords
+        : null;
+
+      await updateDoc(docRef, updateData);
 
       // 設定一覧ページに戻る
       router.push('/dashboard/settings');
