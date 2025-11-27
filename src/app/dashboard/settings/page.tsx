@@ -13,7 +13,8 @@ import {
   doc, 
   deleteDoc 
 } from 'firebase/firestore'; 
-import { Trash2 } from 'lucide-react'; // 
+import { Trash2, Copy } from 'lucide-react';
+import { useRouter } from 'next/navigation'; 
 
 interface OcrSetting {
   id: string; 
@@ -27,10 +28,11 @@ interface OcrSetting {
  * (UI修正: 設定名クリックで編集、削除ボタンをアイコン化)
  */
 export default function OcrSettingsPage() {
-  const [settingsList, setSettingsList] = useState<OcrSetting[]>([]); 
-  const [isLoading, setIsLoading] = useState(true); 
+  const [settingsList, setSettingsList] = useState<OcrSetting[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
   const [isDeleting, setIsDeleting] = useState<string | null>(null);
-  const { currentUser } = useAuth(); 
+  const { currentUser } = useAuth();
+  const router = useRouter(); 
 
   useEffect(() => {
     if (!currentUser) {
@@ -84,10 +86,16 @@ export default function OcrSettingsPage() {
       console.error("Error deleting setting: ", error);
       alert("削除に失敗しました。");
     } finally {
-      setIsDeleting(null); 
+      setIsDeleting(null);
     }
   };
 
+  /**
+   * テンプレートとしてコピー
+   */
+  const handleCopyAsTemplate = (id: string) => {
+    router.push(`/dashboard/settings/new?template=${id}`);
+  };
 
   return (
     <div>
@@ -148,19 +156,30 @@ export default function OcrSettingsPage() {
                     {setting.created_at.toDate().toLocaleDateString()}
                   </td>
                   
-                  {/* --- 2. 修正点: 削除ボタンをアイコン化 --- */}
+                  {/* --- 2. アクションボタン（テンプレートコピー、削除） --- */}
                   <td className="p-3 text-sm">
-                    <button
-                      onClick={() => handleDeleteSetting(setting.id)}
-                      className="font-medium text-red-600 hover:text-red-500 disabled:opacity-50"
-                      disabled={isDeleting === setting.id || isLoading}
-                    >
-                      {isDeleting === setting.id ? (
-                        <span className="text-xs">削除中...</span>
-                      ) : (
-                        <Trash2 className="h-4 w-4" /> 
-                      )}
-                    </button>
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => handleCopyAsTemplate(setting.id)}
+                        className="font-medium text-blue-600 hover:text-blue-500 disabled:opacity-50"
+                        disabled={isDeleting !== null || isLoading}
+                        title="テンプレートとしてコピー"
+                      >
+                        <Copy className="h-4 w-4" />
+                      </button>
+                      <button
+                        onClick={() => handleDeleteSetting(setting.id)}
+                        className="font-medium text-red-600 hover:text-red-500 disabled:opacity-50"
+                        disabled={isDeleting === setting.id || isLoading}
+                        title="削除"
+                      >
+                        {isDeleting === setting.id ? (
+                          <span className="text-xs">削除中...</span>
+                        ) : (
+                          <Trash2 className="h-4 w-4" />
+                        )}
+                      </button>
+                    </div>
                   </td>
 
                 </tr>

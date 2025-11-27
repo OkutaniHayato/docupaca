@@ -11,6 +11,20 @@ export async function POST(request: NextRequest) {
 
     const formData = await request.formData();
     const file = formData.get('file') as File;
+    const existingFieldsJson = formData.get('existing_fields') as string | null;
+
+    // テンプレートモード：既存フィールド構造を維持
+    let existingFields = null;
+    if (existingFieldsJson) {
+      try {
+        existingFields = JSON.parse(existingFieldsJson);
+      } catch {
+        return NextResponse.json(
+          { error: '既存フィールドの解析に失敗しました' },
+          { status: 400 }
+        );
+      }
+    }
 
     if (!file) {
       return NextResponse.json(
@@ -75,7 +89,45 @@ export async function POST(request: NextRequest) {
     const genAI = new GoogleGenerativeAI(apiKey);
     const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash-exp' });
 
-    const prompt = `以下の帳票画像を解析して、OCR抽出設定を生成してください。
+    // テンプレートモードか通常モードかでプロンプトを切り替え
+    let prompt: string;
+
+    if (existingFields && Array.isArray(existingFields) && existingFields.length > 0) {
+      // テンプレートモード：既存フィールド構造を維持
+      const existingFieldsStr = JSON.stringify(existingFields, null, 2);
+      prompt = `以下の帳票画像を解析して、既存のフィールド構造を維持したままOCR抽出設定を更新してください。
+
+【重要な制約】
+- フィールドの追加・削除・名前変更は絶対に行わないでください
+- 既存のname, type, children構造をそのまま維持してください
+- 各フィールドの「instruction」のみを、この新しい帳票に適した内容に更新してください
+
+【既存のフィールド構造】
+${existingFieldsStr}
+
+【出力形式】
+以下のJSON形式で出力してください。JSONのみを出力し、他の説明文は含めないでください。
+
+{
+  "documentName": "帳票の種類名（例：請求書、納品書、領収書など）",
+  "extractionInstruction": "この帳票から抽出する際の全体的な指示",
+  "extractionFields": [
+    // 既存のフィールド構造をそのまま維持し、instructionのみ更新
+  ]
+}
+
+【ルール】
+1. documentNameは日本語で帳票の種類を簡潔に表現
+2. extractionInstructionは、この新しい帳票に適した全体的な抽出方針を日本語で記述
+3. extractionFieldsは、上記の「既存のフィールド構造」と完全に同じname, type, children構造を維持
+4. 各フィールドのinstructionは、この新しい帳票の特徴に合わせて更新（例：フィールドの位置、フォーマット、ラベルなど）
+5. 配列フィールド(type="array")の場合、children内の各子フィールドのinstructionも更新
+6. JSONのみを出力し、マークダウンのコードブロック（\`\`\`json）は使用しない
+
+それでは、この帳票を解析して、既存フィールド構造を維持しながらinstructionを更新したJSONを生成してください。`;
+    } else {
+      // 通常モード：新規フィールド生成
+      prompt = `以下の帳票画像を解析して、OCR抽出設定を生成してください。
 
 【出力形式】
 以下のJSON形式で出力してください。JSONのみを出力し、他の説明文は含めないでください。
@@ -119,6 +171,7 @@ export async function POST(request: NextRequest) {
 12. JSONのみを出力し、マークダウンのコードブロック（\`\`\`json）は使用しない
 
 それでは、この帳票を解析して上記形式のJSONを生成してください。`;
+    }
 
     const result = await model.generateContent([
       {
