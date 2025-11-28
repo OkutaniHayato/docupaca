@@ -4,6 +4,27 @@
  */
 
 /**
+ * 組織（取引先・会社）
+ * OCR設定をグルーピングするためのマスタ
+ */
+export interface Organization {
+  /** 組織名（会社名） */
+  name: string;
+
+  /** 説明（オプション） */
+  description?: string;
+
+  /** 所有者UID */
+  owner_id: string;
+
+  /** 作成日時 */
+  created_at: FirebaseFirestore.Timestamp | Date;
+
+  /** 更新日時 */
+  updated_at?: FirebaseFirestore.Timestamp | Date;
+}
+
+/**
  * 抽出フィールドの定義
  * - single: 単一値フィールド（例: 請求書番号、発行日）
  * - array: 繰り返し構造フィールド（例: 明細行、商品リスト）
@@ -84,6 +105,9 @@ export interface OcrSetting {
 
   /** 所有者UID */
   owner_id: string;
+
+  /** 組織ID（紐づく組織のドキュメントID） */
+  organization_id?: string;
 
   /** プロンプトテキスト */
   prompt_text: string;

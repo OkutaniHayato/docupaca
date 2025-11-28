@@ -55,6 +55,8 @@ export default function EditOcrSettingPage() {
             prompt_text: data.prompt_text,
             extraction_fields: data.extraction_fields || [],
             sample_file_path: data.sample_file_path,
+            // 組織ID
+            organization_id: data.organization_id,
             // AI自動判定用メタ情報
             displayName: data.displayName,
             templateType: data.templateType,
@@ -115,6 +117,9 @@ export default function EditOcrSettingPage() {
         extraction_fields: data.extraction_fields,
         sample_file_path: sampleFilePath,
       };
+
+      // 組織ID（空の場合はnullで上書き）
+      updateData.organization_id = data.organization_id || null;
 
       // AI自動判定用メタ情報（空の場合はnullで上書き）
       updateData.displayName = data.displayName || null;
