@@ -526,12 +526,18 @@ export default function KnowledgePage() {
 
       {/* モーダル */}
       {isModalOpen && (
-        <div className="fixed inset-0 flex items-center justify-center z-50" style={{ backgroundColor: 'rgba(0, 0, 0, 0.1)' }}>
-          <div className="bg-white rounded-lg shadow-xl max-w-2xl w-full mx-4 max-h-[90vh] overflow-y-auto">
+        <div className="fixed inset-0 flex items-center justify-center z-50 px-8" style={{ backgroundColor: 'rgba(0, 0, 0, 0.1)' }}>
+          <div className="bg-white rounded-lg shadow-xl w-full max-w-lg max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between px-6 py-4 border-b">
-              <h2 className="text-lg font-semibold text-gray-900">
-                {editingDoc ? 'ナレッジを編集' : 'ナレッジを追加'}
-              </h2>
+              <div>
+                <h2 className="text-lg font-semibold text-gray-900">
+                  {editingDoc ? 'ナレッジを編集' : 'ナレッジを追加'}
+                </h2>
+                <p className="text-sm text-green-600 flex items-center gap-1 mt-1">
+                  <Building2 className="h-4 w-4" />
+                  {organizations.find(org => org.id === selectedOrgId)?.name || '組織未選択'}
+                </p>
+              </div>
               <button
                 onClick={handleCloseModal}
                 className="text-gray-400 hover:text-gray-600"
