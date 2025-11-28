@@ -270,6 +270,9 @@ interface ExtractedValue {
   bbox: BBox;
   page?: number;
   confidence?: number; // AI抽出の信頼度（0〜1.0）
+  // 学習補正関連（機能④）
+  originalValue?: string; // AIの元出力値（補正前）
+  wasLearningCorrected?: boolean; // 学習補正が適用されたか
 }
 
 /**
@@ -289,6 +292,36 @@ type ExtractedData = {
   [fieldName: string]: ExtractedValue | ExtractedArrayData;
 };
 
+/**
+ * 置換ルール（訂正学習から生成）
+ */
+interface ReplacementRule {
+  fieldKey: string;
+  aiValue: string;
+  correctValue: string;
+  count: number;
+  updatedAt: admin.firestore.Timestamp;
+}
+
+/**
+ * 位置ヒント（訂正学習から生成）
+ */
+interface PreferredRegion {
+  fieldKey: string;
+  region: { x: number; y: number; w: number; h: number };
+  sampleCount: number;
+  updatedAt: admin.firestore.Timestamp;
+}
+
+/**
+ * 学習データ
+ */
+interface LearningData {
+  replacements: ReplacementRule[];
+  preferredRegions?: PreferredRegion[];
+  lastLearnedAt?: admin.firestore.Timestamp;
+}
+
 // OCR設定のデータ型
 interface OcrSetting {
   name: string;
@@ -297,6 +330,8 @@ interface OcrSetting {
   extraction_fields: ExtractionField[];
   model_name: string;
   created_at: admin.firestore.Timestamp;
+  // 学習データ（機能④）
+  learning?: LearningData;
 }
 
 // OCR履歴のデータ型
@@ -373,6 +408,156 @@ function generateFieldDescriptions(fields: ExtractionField[], indent = 0): strin
   }
 
   return lines.join('\n');
+}
+
+/**
+ * 学習データからプロンプト用の補正ルール説明を生成
+ * 訂正履歴に基づいた補正ルールをLLMに伝える
+ */
+function generateLearningInstructions(learning?: LearningData): string {
+  if (!learning) {
+    return '';
+  }
+
+  const lines: string[] = [];
+
+  // 置換ルールの説明を生成
+  if (learning.replacements && learning.replacements.length > 0) {
+    lines.push('【過去の訂正履歴に基づく補正ルール】');
+    lines.push('以下は過去の訂正履歴から学習した補正ルールです。該当するパターンが検出された場合、可能な限り補正後の値を優先してください：');
+    lines.push('');
+
+    // フィールドごとにグループ化
+    const byField: Record<string, ReplacementRule[]> = {};
+    for (const rule of learning.replacements) {
+      if (!byField[rule.fieldKey]) {
+        byField[rule.fieldKey] = [];
+      }
+      byField[rule.fieldKey].push(rule);
+    }
+
+    for (const [fieldKey, rules] of Object.entries(byField)) {
+      lines.push(`■ フィールド「${fieldKey}」:`);
+      for (const rule of rules) {
+        lines.push(`  - 「${rule.aiValue}」と読み取った場合 → 「${rule.correctValue}」に補正（過去${rule.count}回の訂正実績）`);
+      }
+    }
+    lines.push('');
+  }
+
+  // 位置ヒントの説明を生成
+  if (learning.preferredRegions && learning.preferredRegions.length > 0) {
+    lines.push('【推奨抽出領域】');
+    lines.push('以下のフィールドは、過去の実績から特定の領域から抽出すると精度が高いことがわかっています：');
+    lines.push('');
+
+    for (const region of learning.preferredRegions) {
+      const { x, y, w, h } = region.region;
+      const positionDesc = getPositionDescription(x, y, w, h);
+      lines.push(`  - ${region.fieldKey}: ${positionDesc}（サンプル数: ${region.sampleCount}）`);
+    }
+    lines.push('');
+  }
+
+  return lines.join('\n');
+}
+
+/**
+ * 正規化座標から位置の説明を生成
+ */
+function getPositionDescription(x: number, y: number, w: number, h: number): string {
+  // 横位置の判定
+  let horizontal = '中央';
+  if (x + w / 2 < 0.33) {
+    horizontal = '左側';
+  } else if (x + w / 2 > 0.67) {
+    horizontal = '右側';
+  }
+
+  // 縦位置の判定
+  let vertical = '中央';
+  if (y + h / 2 < 0.33) {
+    vertical = '上部';
+  } else if (y + h / 2 > 0.67) {
+    vertical = '下部';
+  }
+
+  return `ドキュメントの${vertical}${horizontal}（座標: x=${(x * 100).toFixed(0)}%, y=${(y * 100).toFixed(0)}%, 幅=${(w * 100).toFixed(0)}%, 高さ=${(h * 100).toFixed(0)}%）`;
+}
+
+/**
+ * 抽出結果に置換ルールを適用する（post-processing）
+ * LLMの出力値をreplacementsに基づいて補正する
+ */
+function applyReplacements(
+  extractedData: ExtractedData,
+  replacements: ReplacementRule[]
+): ExtractedData {
+  if (!replacements || replacements.length === 0) {
+    return extractedData;
+  }
+
+  // ルールをフィールドキーでインデックス化（高速検索用）
+  const rulesByField: Record<string, Map<string, string>> = {};
+  for (const rule of replacements) {
+    if (!rulesByField[rule.fieldKey]) {
+      rulesByField[rule.fieldKey] = new Map();
+    }
+    rulesByField[rule.fieldKey].set(rule.aiValue, rule.correctValue);
+  }
+
+  const result: ExtractedData = {};
+
+  for (const [fieldKey, fieldValue] of Object.entries(extractedData)) {
+    if ('items' in fieldValue && Array.isArray(fieldValue.items)) {
+      // 配列フィールドの場合
+      const correctedItems = fieldValue.items.map((item, index) => {
+        const correctedItem: Record<string, ExtractedValue> = {};
+        for (const [childKey, childValue] of Object.entries(item)) {
+          const fullKey = `${fieldKey}[${index}].${childKey}`;
+          const genericKey = `${fieldKey}[].${childKey}`; // 汎用キー（インデックス不問）
+
+          // ルールを適用
+          const ruleMap = rulesByField[fullKey] || rulesByField[genericKey] || rulesByField[childKey];
+          if (ruleMap && ruleMap.has(childValue.value)) {
+            correctedItem[childKey] = {
+              ...childValue,
+              originalValue: childValue.value,
+              value: ruleMap.get(childValue.value)!,
+              wasLearningCorrected: true,
+            };
+            functions.logger.info(`学習補正適用: ${fullKey} "${childValue.value}" → "${ruleMap.get(childValue.value)}"`);
+          } else {
+            correctedItem[childKey] = childValue;
+          }
+        }
+        return correctedItem;
+      });
+
+      result[fieldKey] = {
+        ...fieldValue,
+        items: correctedItems,
+      };
+    } else if ('value' in fieldValue) {
+      // 単一値フィールドの場合
+      const ruleMap = rulesByField[fieldKey];
+      if (ruleMap && ruleMap.has(fieldValue.value)) {
+        result[fieldKey] = {
+          ...fieldValue,
+          originalValue: fieldValue.value,
+          value: ruleMap.get(fieldValue.value)!,
+          wasLearningCorrected: true,
+        };
+        functions.logger.info(`学習補正適用: ${fieldKey} "${fieldValue.value}" → "${ruleMap.get(fieldValue.value)}"`);
+      } else {
+        result[fieldKey] = fieldValue;
+      }
+    } else {
+      result[fieldKey] = fieldValue;
+    }
+  }
+
+  return result;
 }
 
 /**
@@ -497,11 +682,20 @@ export const executeOcr = functions.https.onCall(
       const extractionFieldsDescription = generateFieldDescriptions(setting.extraction_fields);
       const jsonSchemaExample = generateJsonSchemaFromFields(setting.extraction_fields);
 
+      // 学習データがあれば学習指示を生成
+      const learningInstructions = generateLearningInstructions(setting.learning);
+      const hasLearning = learningInstructions.length > 0;
+
+      if (hasLearning) {
+        functions.logger.info(`学習データ適用: ${setting.learning?.replacements?.length || 0}個の置換ルール, ${setting.learning?.preferredRegions?.length || 0}個の位置ヒント`);
+      }
+
       const prompt = `${setting.prompt_text}
 
 【抽出項目】
 ${extractionFieldsDescription}
-
+${hasLearning ? `
+${learningInstructions}` : ''}
 【出力形式】
 以下のJSON形式で出力してください。JSONのみを出力し、他の説明文は含めないでください。
 
@@ -517,7 +711,8 @@ ${jsonSchemaExample}
    - 1.0: 非常に自信がある（文字がはっきり読める、フォーマットが明確）
    - 0.8〜0.9: ある程度自信がある
    - 0.5〜0.7: やや不確か（文字がかすれている、推測が入る）
-   - 0.5未満: 自信がない（読み取りにくい、推測要素が大きい）`;
+   - 0.5未満: 自信がない（読み取りにくい、推測要素が大きい）${hasLearning ? `
+7. 【学習補正】上記の「過去の訂正履歴に基づく補正ルール」に該当するパターンを検出した場合、可能な限り補正後の値を出力してください。` : ''}`;
 
       functions.logger.info('Gemini API呼び出し開始');
 
@@ -652,6 +847,13 @@ ${jsonSchemaExample}
           functions.logger.error('JSON解析エラー:', error);
           throw new Error(`Gemini API応答のJSON解析に失敗しました: ${text.substring(0, 200)}`);
         }
+      }
+
+      // 5.5. 学習補正の適用（post-processing）
+      // LLMへのプロンプトで補正を促した上で、さらにサーバー側でも確実に補正を適用
+      if (setting.learning?.replacements && setting.learning.replacements.length > 0 && extractedData) {
+        functions.logger.info('学習補正（post-processing）を適用中...');
+        extractedData = applyReplacements(extractedData, setting.learning.replacements);
       }
 
       // 6. ocr_historyを更新（成功）
