@@ -102,6 +102,11 @@ export interface OcrSetting {
 
   /** テンプレート判定用キーワード（タイトル、固定ラベルなど） */
   exampleKeywords?: string[];
+
+  // === 訂正学習データ（機能③） ===
+
+  /** 学習データ（訂正ログから自動生成） */
+  learning?: LearningData;
 }
 
 /**
@@ -173,6 +178,65 @@ export interface OcrHistory {
 }
 
 /**
+ * 置換ルール（訂正学習から生成）
+ * AIの抽出ミスを自動補正するためのルール
+ */
+export interface ReplacementRule {
+  /** フィールドキー（例: "invoiceDate"） */
+  fieldKey: string;
+
+  /** AIが抽出した値（補正前） */
+  aiValue: string;
+
+  /** 正しい値（補正後） */
+  correctValue: string;
+
+  /** この訂正が発生した回数 */
+  count: number;
+
+  /** 最終更新日時 */
+  updatedAt: FirebaseFirestore.Timestamp | Date;
+}
+
+/**
+ * 位置ヒント（訂正学習から生成）
+ * 特定フィールドの推奨抽出領域
+ */
+export interface PreferredRegion {
+  /** フィールドキー */
+  fieldKey: string;
+
+  /** 推奨領域（正規化座標） */
+  region: {
+    x: number;
+    y: number;
+    w: number;
+    h: number;
+  };
+
+  /** サンプル数（この領域を計算するのに使用した訂正数） */
+  sampleCount: number;
+
+  /** 最終更新日時 */
+  updatedAt: FirebaseFirestore.Timestamp | Date;
+}
+
+/**
+ * 学習データ（テンプレートに蓄積）
+ * 訂正ログから自動生成される補正ルール
+ */
+export interface LearningData {
+  /** 置換ルール配列 */
+  replacements: ReplacementRule[];
+
+  /** 位置ヒント配列（オプション） */
+  preferredRegions?: PreferredRegion[];
+
+  /** 最終学習実行日時 */
+  lastLearnedAt?: FirebaseFirestore.Timestamp | Date;
+}
+
+/**
  * 訂正ログ（corrections コレクション用）
  * AIの抽出結果と人間の確定値の差分を記録
  */
@@ -217,4 +281,73 @@ export function isExtractedArrayData(data: ExtractedValue | ExtractedArrayData |
  */
 export function isExtractedValue(data: ExtractedValue | ExtractedArrayData | null | undefined): data is ExtractedValue {
   return !!data && typeof data === 'object' && 'value' in data && typeof data.value === 'string';
+}
+
+/**
+ * 訂正学習バッチの設定（app_settings/correction_learning）
+ */
+export interface CorrectionLearningSettings {
+  /** バッチ処理の有効/無効 */
+  enabled: boolean;
+
+  /** 実行時刻（0-23の整数、JST） */
+  scheduledHour: number;
+
+  /** 対象日数（過去何日分の訂正を集計するか） */
+  lookbackDays: number;
+
+  /** 最低発生回数（何回以上の訂正で学習するか） */
+  minOccurrenceCount: number;
+
+  /** 最終更新日時 */
+  updatedAt: FirebaseFirestore.Timestamp | Date;
+
+  /** 更新者UID */
+  updatedBy?: string;
+}
+
+/**
+ * 学習履歴の学習ルール詳細
+ */
+export interface LearningHistoryRule {
+  templateId: string;
+  templateName?: string;
+  fieldKey: string;
+  aiValue: string;
+  correctValue: string;
+  count: number;
+  isNew: boolean; // 新規追加かどうか
+}
+
+/**
+ * 学習履歴（learning_history コレクション）
+ * バッチ実行ごとに1レコード作成
+ */
+export interface LearningHistory {
+  /** 実行日時 */
+  executedAt: FirebaseFirestore.Timestamp | Date;
+
+  /** 実行タイプ（scheduled: スケジュール実行, manual: 手動実行） */
+  executionType: 'scheduled' | 'manual';
+
+  /** 処理統計 */
+  stats: {
+    totalCorrections: number;
+    templatesProcessed: number;
+    rulesAdded: number;
+    rulesUpdated: number;
+    errors: number;
+  };
+
+  /** 処理時間（ミリ秒） */
+  durationMs: number;
+
+  /** 学習ルール詳細 */
+  rules: LearningHistoryRule[];
+
+  /** 設定パラメータ */
+  settings: {
+    lookbackDays: number;
+    minOccurrenceCount: number;
+  };
 }

@@ -3,35 +3,40 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation'; // 
 import { useAuth } from '@/context/AuthContext'; // 
-import { 
-  LayoutDashboard, 
-  Settings, 
-  History, 
-  KeyRound, 
-  LogOut // 
-} from 'lucide-react'; // 
+import {
+  LayoutDashboard,
+  Settings,
+  History,
+  KeyRound,
+  LogOut,
+  GraduationCap
+} from 'lucide-react';
 
-// 
 const menuItems = [
-  { 
-    name: 'ダッシュボード', 
-    href: '/dashboard', 
-    icon: LayoutDashboard 
+  {
+    name: 'ダッシュボード',
+    href: '/dashboard',
+    icon: LayoutDashboard
   },
-  { 
-    name: 'OCR設定', 
-    href: '/dashboard/settings', 
-    icon: Settings 
+  {
+    name: 'OCR設定',
+    href: '/dashboard/settings',
+    icon: Settings
   },
-  { 
-    name: '実行履歴', 
-    href: '/dashboard/history', 
-    icon: History 
+  {
+    name: '実行履歴',
+    href: '/dashboard/history',
+    icon: History
   },
-  { 
-    name: 'APIキー', 
-    href: '/dashboard/apikeys', 
-    icon: KeyRound 
+  {
+    name: '学習設定',
+    href: '/dashboard/learning',
+    icon: GraduationCap
+  },
+  {
+    name: 'APIキー',
+    href: '/dashboard/apikeys',
+    icon: KeyRound
   },
 ];
 
