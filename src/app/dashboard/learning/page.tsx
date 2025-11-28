@@ -22,7 +22,9 @@ import {
   Timer,
   FileText,
   Plus,
-  RefreshCw
+  RefreshCw,
+  Eye,
+  X
 } from 'lucide-react';
 
 // デフォルト設定
@@ -32,6 +34,26 @@ const DEFAULT_SETTINGS: Omit<CorrectionLearningSettings, 'updatedAt' | 'updatedB
   lookbackDays: 30,
   minOccurrenceCount: 3,
 };
+
+// プレビューデータの型
+interface PreviewPattern {
+  templateId: string;
+  templateName?: string;
+  fieldKey: string;
+  aiValue: string;
+  correctValue: string;
+  count: number;
+}
+
+interface PreviewData {
+  totalCorrections: number;
+  qualifiedPatterns: PreviewPattern[];
+  unqualifiedPatterns: PreviewPattern[];
+  settings: {
+    lookbackDays: number;
+    minOccurrenceCount: number;
+  };
+}
 
 // 履歴アイテムコンポーネント
 function HistoryItem({ history, id }: { history: LearningHistory; id: string }) {
@@ -201,6 +223,9 @@ export default function LearningSettingsPage() {
   const [loadingHistory, setLoadingHistory] = useState(true);
   const [saving, setSaving] = useState(false);
   const [executing, setExecuting] = useState(false);
+  const [previewing, setPreviewing] = useState(false);
+  const [previewData, setPreviewData] = useState<PreviewData | null>(null);
+  const [showPreview, setShowPreview] = useState(false);
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
   // 設定を取得
@@ -300,6 +325,42 @@ export default function LearningSettingsPage() {
       setMessage({ type: 'error', text: errorMessage });
     } finally {
       setExecuting(false);
+    }
+  };
+
+  // プレビュー取得
+  const handlePreview = async () => {
+    if (!currentUser) return;
+
+    setPreviewing(true);
+    setMessage(null);
+
+    try {
+      const token = await currentUser.getIdToken();
+      const response = await fetch('/api/preview-correction-learning', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+      });
+
+      const result = await response.json();
+
+      if (!response.ok) {
+        throw new Error(result.error || 'プレビューの取得に失敗しました');
+      }
+
+      if (result.success) {
+        setPreviewData(result);
+        setShowPreview(true);
+      }
+    } catch (error) {
+      console.error('プレビュー取得に失敗:', error);
+      const errorMessage = error instanceof Error ? error.message : 'プレビューの取得に失敗しました';
+      setMessage({ type: 'error', text: errorMessage });
+    } finally {
+      setPreviewing(false);
     }
   };
 
@@ -521,6 +582,153 @@ export default function LearningSettingsPage() {
         </p>
       )}
 
+      {/* 学習対象データプレビュー */}
+      {showPreview && previewData && (
+        <div className="rounded-lg border bg-white p-6 shadow-sm">
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center space-x-3">
+              <Eye className="h-6 w-6 text-blue-600" />
+              <h2 className="text-xl font-bold text-gray-900">学習対象データ（プレビュー）</h2>
+            </div>
+            <button
+              onClick={() => setShowPreview(false)}
+              className="p-2 hover:bg-gray-100 rounded-lg transition"
+            >
+              <X className="h-5 w-5 text-gray-500" />
+            </button>
+          </div>
+
+          {/* 概要 */}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
+            <div className="bg-gray-50 p-3 rounded-lg border">
+              <div className="text-xs text-gray-500">対象期間</div>
+              <div className="text-lg font-semibold text-gray-900">
+                過去{previewData.settings.lookbackDays}日
+              </div>
+            </div>
+            <div className="bg-gray-50 p-3 rounded-lg border">
+              <div className="text-xs text-gray-500">訂正データ総数</div>
+              <div className="text-lg font-semibold text-gray-900">
+                {previewData.totalCorrections}件
+              </div>
+            </div>
+            <div className="bg-green-50 p-3 rounded-lg border border-green-200">
+              <div className="text-xs text-green-600">学習対象パターン</div>
+              <div className="text-lg font-semibold text-green-700">
+                {previewData.qualifiedPatterns.length}件
+              </div>
+              <div className="text-xs text-green-500">
+                （{previewData.settings.minOccurrenceCount}回以上）
+              </div>
+            </div>
+            <div className="bg-gray-50 p-3 rounded-lg border">
+              <div className="text-xs text-gray-500">基準未満パターン</div>
+              <div className="text-lg font-semibold text-gray-700">
+                {previewData.unqualifiedPatterns.length}件
+              </div>
+            </div>
+          </div>
+
+          {/* 学習対象パターン */}
+          {previewData.qualifiedPatterns.length > 0 ? (
+            <div className="mb-4">
+              <h3 className="font-medium text-gray-900 mb-2 flex items-center">
+                <CheckCircle className="h-4 w-4 mr-2 text-green-600" />
+                学習対象パターン（実行時に学習されます）
+              </h3>
+              <div className="bg-white border rounded-lg overflow-hidden">
+                <div className="max-h-64 overflow-y-auto">
+                  <table className="w-full text-sm">
+                    <thead className="bg-green-50 sticky top-0">
+                      <tr>
+                        <th className="px-3 py-2 text-left text-gray-600">テンプレート</th>
+                        <th className="px-3 py-2 text-left text-gray-600">フィールド</th>
+                        <th className="px-3 py-2 text-left text-gray-600">AI値</th>
+                        <th className="px-3 py-2 text-left text-gray-600">正解値</th>
+                        <th className="px-3 py-2 text-center text-gray-600">回数</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y">
+                      {previewData.qualifiedPatterns.map((pattern, index) => (
+                        <tr key={index} className="hover:bg-gray-50">
+                          <td className="px-3 py-2 text-gray-900 truncate max-w-[150px]" title={pattern.templateName}>
+                            {pattern.templateName || pattern.templateId}
+                          </td>
+                          <td className="px-3 py-2 text-gray-700 font-mono text-xs">
+                            {pattern.fieldKey}
+                          </td>
+                          <td className="px-3 py-2 text-red-600 truncate max-w-[120px]" title={pattern.aiValue}>
+                            {pattern.aiValue}
+                          </td>
+                          <td className="px-3 py-2 text-green-600 truncate max-w-[120px]" title={pattern.correctValue}>
+                            {pattern.correctValue}
+                          </td>
+                          <td className="px-3 py-2 text-center font-semibold text-gray-900">
+                            {pattern.count}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div className="mb-4 p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
+              <p className="text-yellow-700">
+                現在の設定では学習対象となるパターンがありません。
+                対象日数を増やすか、最低発生回数を減らしてみてください。
+              </p>
+            </div>
+          )}
+
+          {/* 基準未満パターン */}
+          {previewData.unqualifiedPatterns.length > 0 && (
+            <details className="mb-4">
+              <summary className="cursor-pointer text-sm text-gray-600 hover:text-gray-900">
+                基準未満のパターンを表示（上位20件）
+              </summary>
+              <div className="mt-2 bg-white border rounded-lg overflow-hidden">
+                <div className="max-h-48 overflow-y-auto">
+                  <table className="w-full text-sm">
+                    <thead className="bg-gray-100 sticky top-0">
+                      <tr>
+                        <th className="px-3 py-2 text-left text-gray-600">テンプレート</th>
+                        <th className="px-3 py-2 text-left text-gray-600">フィールド</th>
+                        <th className="px-3 py-2 text-left text-gray-600">AI値</th>
+                        <th className="px-3 py-2 text-left text-gray-600">正解値</th>
+                        <th className="px-3 py-2 text-center text-gray-600">回数</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y">
+                      {previewData.unqualifiedPatterns.map((pattern, index) => (
+                        <tr key={index} className="hover:bg-gray-50">
+                          <td className="px-3 py-2 text-gray-900 truncate max-w-[150px]" title={pattern.templateName}>
+                            {pattern.templateName || pattern.templateId}
+                          </td>
+                          <td className="px-3 py-2 text-gray-700 font-mono text-xs">
+                            {pattern.fieldKey}
+                          </td>
+                          <td className="px-3 py-2 text-red-600 truncate max-w-[120px]" title={pattern.aiValue}>
+                            {pattern.aiValue}
+                          </td>
+                          <td className="px-3 py-2 text-green-600 truncate max-w-[120px]" title={pattern.correctValue}>
+                            {pattern.correctValue}
+                          </td>
+                          <td className="px-3 py-2 text-center text-gray-500">
+                            {pattern.count}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </details>
+          )}
+        </div>
+      )}
+
       {/* 学習履歴セクション */}
       <div className="rounded-lg border bg-white p-6 shadow-sm">
         <div className="flex items-center justify-between mb-4">
@@ -528,18 +736,32 @@ export default function LearningSettingsPage() {
             <History className="h-6 w-6 text-green-600" />
             <h2 className="text-xl font-bold text-gray-900">学習履歴</h2>
           </div>
-          <button
-            onClick={handleManualExecution}
-            disabled={executing}
-            className="flex items-center rounded-lg bg-purple-600 px-4 py-2 text-white transition hover:bg-purple-700 disabled:bg-gray-400"
-          >
-            {executing ? (
-              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-            ) : (
-              <PlayCircle className="mr-2 h-4 w-4" />
-            )}
-            {executing ? '実行中...' : '手動実行'}
-          </button>
+          <div className="flex items-center space-x-2">
+            <button
+              onClick={handlePreview}
+              disabled={previewing}
+              className="flex items-center rounded-lg bg-blue-600 px-4 py-2 text-white transition hover:bg-blue-700 disabled:bg-gray-400"
+            >
+              {previewing ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : (
+                <Eye className="mr-2 h-4 w-4" />
+              )}
+              {previewing ? '取得中...' : 'プレビュー'}
+            </button>
+            <button
+              onClick={handleManualExecution}
+              disabled={executing}
+              className="flex items-center rounded-lg bg-purple-600 px-4 py-2 text-white transition hover:bg-purple-700 disabled:bg-gray-400"
+            >
+              {executing ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : (
+                <PlayCircle className="mr-2 h-4 w-4" />
+              )}
+              {executing ? '実行中...' : '手動実行'}
+            </button>
+          </div>
         </div>
 
         {loadingHistory ? (
