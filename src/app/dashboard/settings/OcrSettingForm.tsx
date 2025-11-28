@@ -13,7 +13,15 @@ import {
   Plus,
   Trash2
 } from 'lucide-react';
-import { ExtractionField } from '@/types/ocr';
+import { ExtractionField, Organization } from '@/types/ocr';
+import { useAuth } from '@/context/AuthContext';
+import { db } from '@/config/firebase';
+import { collection, query, where, orderBy, onSnapshot } from 'firebase/firestore';
+
+// 組織の型（IDを含む）
+interface OrganizationWithId extends Organization {
+  id: string;
+}
 
 // PDFプレビューコンポーネントを動的インポート（SSR無効化）
 const PdfPreview = dynamic(
@@ -35,6 +43,8 @@ export interface OcrSettingFormData {
   prompt_text: string;
   extraction_fields: ExtractionField[];
   sample_file_path?: string; // Firebase Storageのファイルパス
+  // 組織（取引先）紐付け
+  organization_id?: string;
   // AI自動判定用メタ情報（オプショナル）
   displayName?: string;
   templateType?: string;
@@ -153,6 +163,7 @@ export default function OcrSettingForm({
   saveButtonText = "保存する",
   isTemplateMode = false
 }: OcrSettingFormProps) {
+  const { currentUser } = useAuth();
 
   const [formData, setFormData] = useState<OcrSettingFormData>(
     initialData || {
@@ -160,8 +171,33 @@ export default function OcrSettingForm({
       model_name: 'gemini-2.5-flash-lite',
       prompt_text: '',
       extraction_fields: [],
+      organization_id: '',
     }
   );
+
+  // 組織一覧
+  const [organizations, setOrganizations] = useState<OrganizationWithId[]>([]);
+
+  // 組織一覧を取得
+  useEffect(() => {
+    if (!currentUser) return;
+
+    const q = query(
+      collection(db, 'organizations'),
+      where('owner_id', '==', currentUser.uid),
+      orderBy('name', 'asc')
+    );
+
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const orgs: OrganizationWithId[] = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data(),
+      } as OrganizationWithId));
+      setOrganizations(orgs);
+    });
+
+    return () => unsubscribe();
+  }, [currentUser]);
 
   // initialDataが変更されたときにformDataを更新
   useEffect(() => {
@@ -475,6 +511,33 @@ export default function OcrSettingForm({
             disabled={isLoading}
           />
         </div>
+
+        {/* 組織（取引先）選択 */}
+        <div className="mt-4">
+          <label htmlFor="organization_id" className="block text-sm font-medium text-gray-700">
+            組織（取引先）
+          </label>
+          <select
+            id="organization_id"
+            value={formData.organization_id || ''}
+            onChange={handleChange}
+            className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 text-gray-900 shadow-sm focus:border-green-500 focus:ring-2 focus:ring-green-500 disabled:opacity-50"
+            disabled={isLoading}
+          >
+            <option value="">-- 組織を選択 --</option>
+            {organizations.map((org) => (
+              <option key={org.id} value={org.id}>
+                {org.name}
+              </option>
+            ))}
+          </select>
+          {organizations.length === 0 && (
+            <p className="mt-1 text-xs text-gray-500">
+              組織が登録されていません。<a href="/dashboard/organizations" className="text-green-600 hover:underline">組織マスタ</a>から登録してください。
+            </p>
+          )}
+        </div>
+
         <div className="mt-4">
           <label htmlFor="model_name" className="block text-sm font-medium text-gray-700">
             使用するAIモデル

@@ -42,6 +42,8 @@ export default function NewOcrSettingPage() {
             prompt_text: data.prompt_text,
             extraction_fields: data.extraction_fields || [],
             sample_file_path: undefined, // 新しいファイルをアップロードさせるため
+            // 組織IDもコピー
+            organization_id: data.organization_id,
             // AI自動判定用メタ情報もコピー
             displayName: data.displayName,
             templateType: data.templateType,
@@ -100,6 +102,11 @@ export default function NewOcrSettingPage() {
         sample_file_path: sampleFilePath,
         created_at: serverTimestamp(),
       };
+
+      // 組織ID（選択されている場合のみ追加）
+      if (data.organization_id) {
+        settingData.organization_id = data.organization_id;
+      }
 
       // AI自動判定用メタ情報（設定されている場合のみ追加）
       if (data.displayName) settingData.displayName = data.displayName;
