@@ -183,16 +183,23 @@ export default function HistoryDetailPage() {
       ) => {
         if (!aiValue || !humanValue) return;
         if (aiValue.value !== humanValue.value) {
-          corrections.push({
+          // undefinedフィールドを除外してcorrectionを作成
+          const correction: Omit<CorrectionLog, 'createdAt'> = {
             docId: historyId,
             templateId: history.setting_id || '',
             fieldKey,
             aiValue: aiValue.value,
             humanValue: humanValue.value,
             aiConfidence: aiValue.confidence ?? 0,
-            bbox: aiValue.bbox,
-            page: aiValue.page,
-          });
+          };
+          // bbox と page は値がある場合のみ追加
+          if (aiValue.bbox !== undefined) {
+            correction.bbox = aiValue.bbox;
+          }
+          if (aiValue.page !== undefined) {
+            correction.page = aiValue.page;
+          }
+          corrections.push(correction);
         }
       };
 
