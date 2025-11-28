@@ -33,7 +33,7 @@ export type BBox = [number, number, number, number];
  * 抽出された単一値
  */
 export interface ExtractedValue {
-  /** 抽出された値（文字列） */
+  /** 抽出された値（文字列）- 補正適用後の値 */
   value: string;
 
   /** バウンディングボックス座標 */
@@ -44,6 +44,14 @@ export interface ExtractedValue {
 
   /** AI抽出の信頼度（0〜1.0、1.0が最も自信あり） */
   confidence?: number;
+
+  // === 学習補正関連（機能④） ===
+
+  /** AIの元出力値（補正前）- 補正が適用された場合のみ存在 */
+  originalValue?: string;
+
+  /** 学習補正が適用されたかどうか */
+  wasLearningCorrected?: boolean;
 }
 
 /**
