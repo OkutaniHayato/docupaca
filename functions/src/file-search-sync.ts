@@ -28,29 +28,13 @@ const db = admin.firestore();
  * 組織学習ドキュメントのタイプ
  */
 type OrgLearningDocType =
-  // マスタ系
+  | 'rule'
   | 'customer_master'
   | 'item_master'
   | 'account_master'
   | 'tax_master'
   | 'department_master'
-  | 'vendor_master'
-  | 'employee_master'
-  // ルール系
-  | 'rule'
   | 'exception'
-  // 帳票系
-  | 'invoice'
-  | 'quotation'
-  | 'purchase_order'
-  | 'delivery_note'
-  | 'receipt'
-  | 'contract'
-  // フォーマット系
-  | 'csv_format'
-  | 'excel_format'
-  | 'pdf_template'
-  // その他
   | 'other';
 
 /**
@@ -171,29 +155,13 @@ export async function ensureOrgStore(orgId: string): Promise<string> {
  */
 function getTypeLabel(type: OrgLearningDocType): string {
   const labels: Record<OrgLearningDocType, string> = {
-    // マスタ系
+    rule: '業務ルール',
     customer_master: '顧客マスタ',
     item_master: '品目マスタ',
     account_master: '勘定科目マスタ',
     tax_master: '税区分マスタ',
     department_master: '部門マスタ',
-    vendor_master: '仕入先マスタ',
-    employee_master: '従業員マスタ',
-    // ルール系
-    rule: '業務ルール',
     exception: '例外ルール',
-    // 帳票系
-    invoice: '請求書',
-    quotation: '見積書',
-    purchase_order: '発注書',
-    delivery_note: '納品書',
-    receipt: '領収書',
-    contract: '契約書',
-    // フォーマット系
-    csv_format: 'CSVフォーマット',
-    excel_format: 'Excelフォーマット',
-    pdf_template: 'PDFテンプレート',
-    // その他
     other: 'その他',
   };
   return labels[type] || type;

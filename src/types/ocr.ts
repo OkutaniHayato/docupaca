@@ -31,30 +31,14 @@ export interface Organization {
  * 組織学習ドキュメントのタイプ
  */
 export type OrgLearningDocType =
-  // マスタ系
-  | 'customer_master'   // 顧客マスタ
-  | 'item_master'       // 品目マスタ
-  | 'account_master'    // 勘定科目マスタ
-  | 'tax_master'        // 税区分マスタ
+  | 'rule'           // 業務ルール（勘定科目割当ルールなど）
+  | 'customer_master' // 顧客マスタ
+  | 'item_master'     // 品目マスタ
+  | 'account_master'  // 勘定科目マスタ
+  | 'tax_master'      // 税区分マスタ
   | 'department_master' // 部門マスタ
-  | 'vendor_master'     // 仕入先マスタ
-  | 'employee_master'   // 従業員マスタ
-  // ルール系
-  | 'rule'              // 業務ルール（勘定科目割当ルールなど）
-  | 'exception'         // 例外ルール
-  // 帳票系
-  | 'invoice'           // 請求書
-  | 'quotation'         // 見積書
-  | 'purchase_order'    // 発注書
-  | 'delivery_note'     // 納品書
-  | 'receipt'           // 領収書
-  | 'contract'          // 契約書
-  // フォーマット系（データ取込用）
-  | 'csv_format'        // CSVフォーマット定義
-  | 'excel_format'      // Excelフォーマット定義
-  | 'pdf_template'      // PDFテンプレート
-  // その他
-  | 'other';            // その他
+  | 'exception'       // 例外ルール
+  | 'other';          // その他
 
 /**
  * 組織学習ドキュメント（orgLearningDocs コレクション）
