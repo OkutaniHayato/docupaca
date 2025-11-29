@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { adminAuth, getAdminApp } from '@/config/firebase-admin';
-import { getStorage } from 'firebase-admin/storage';
+import { adminAuth } from '@/config/firebase-admin';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || '';
@@ -139,25 +138,8 @@ async function parseImage(buffer: Buffer, mimeType: string): Promise<string> {
  */
 async function downloadFileFromStorage(fileUrl: string): Promise<Buffer> {
   try {
-    // URLからパスを抽出
-    const url = new URL(fileUrl);
-
-    // Firebase Storage Download URLの場合
-    if (url.hostname === 'firebasestorage.googleapis.com') {
-      const pathMatch = url.pathname.match(/\/v0\/b\/([^/]+)\/o\/(.+)/);
-      if (pathMatch) {
-        const encodedPath = pathMatch[2];
-        const filePath = decodeURIComponent(encodedPath);
-
-        const bucket = getStorage(getAdminApp()).bucket();
-        const file = bucket.file(filePath);
-
-        const [buffer] = await file.download();
-        return buffer;
-      }
-    }
-
-    // 直接HTTPでダウンロード
+    // Firebase Storage の公開URLは直接HTTPでダウンロード可能
+    // (アクセストークンがURL内に含まれているため)
     const response = await fetch(fileUrl);
     if (!response.ok) {
       throw new Error(`ファイルのダウンロードに失敗しました: ${response.status}`);
