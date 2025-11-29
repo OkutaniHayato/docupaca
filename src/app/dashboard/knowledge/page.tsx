@@ -45,17 +45,56 @@ interface OrganizationWithId extends Organization {
   id: string;
 }
 
-// ドキュメントタイプの定義
-const DOC_TYPES: { value: OrgLearningDocType; label: string }[] = [
-  { value: 'rule', label: '業務ルール' },
-  { value: 'customer_master', label: '顧客マスタ' },
-  { value: 'item_master', label: '品目マスタ' },
-  { value: 'account_master', label: '勘定科目マスタ' },
-  { value: 'tax_master', label: '税区分マスタ' },
-  { value: 'department_master', label: '部門マスタ' },
-  { value: 'exception', label: '例外ルール' },
-  { value: 'other', label: 'その他' },
+// ドキュメントタイプの定義（カテゴリ別）
+const DOC_TYPE_CATEGORIES = [
+  {
+    label: 'マスタ系',
+    types: [
+      { value: 'customer_master' as OrgLearningDocType, label: '顧客マスタ' },
+      { value: 'item_master' as OrgLearningDocType, label: '品目マスタ' },
+      { value: 'account_master' as OrgLearningDocType, label: '勘定科目マスタ' },
+      { value: 'tax_master' as OrgLearningDocType, label: '税区分マスタ' },
+      { value: 'department_master' as OrgLearningDocType, label: '部門マスタ' },
+      { value: 'vendor_master' as OrgLearningDocType, label: '仕入先マスタ' },
+      { value: 'employee_master' as OrgLearningDocType, label: '従業員マスタ' },
+    ],
+  },
+  {
+    label: 'ルール系',
+    types: [
+      { value: 'rule' as OrgLearningDocType, label: '業務ルール' },
+      { value: 'exception' as OrgLearningDocType, label: '例外ルール' },
+    ],
+  },
+  {
+    label: '帳票系',
+    types: [
+      { value: 'invoice' as OrgLearningDocType, label: '請求書' },
+      { value: 'quotation' as OrgLearningDocType, label: '見積書' },
+      { value: 'purchase_order' as OrgLearningDocType, label: '発注書' },
+      { value: 'delivery_note' as OrgLearningDocType, label: '納品書' },
+      { value: 'receipt' as OrgLearningDocType, label: '領収書' },
+      { value: 'contract' as OrgLearningDocType, label: '契約書' },
+    ],
+  },
+  {
+    label: 'フォーマット定義',
+    types: [
+      { value: 'csv_format' as OrgLearningDocType, label: 'CSVフォーマット' },
+      { value: 'excel_format' as OrgLearningDocType, label: 'Excelフォーマット' },
+      { value: 'pdf_template' as OrgLearningDocType, label: 'PDFテンプレート' },
+    ],
+  },
+  {
+    label: 'その他',
+    types: [
+      { value: 'other' as OrgLearningDocType, label: 'その他' },
+    ],
+  },
 ];
+
+// フラットなタイプリスト（フィルタ用）
+const DOC_TYPES: { value: OrgLearningDocType; label: string }[] = DOC_TYPE_CATEGORIES.flatMap(cat => cat.types);
 
 export default function KnowledgePage() {
   const { currentUser } = useAuth();
@@ -557,10 +596,14 @@ export default function KnowledgePage() {
                   onChange={(e) => setFormData(prev => ({ ...prev, type: e.target.value as OrgLearningDocType }))}
                   className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 text-gray-900 focus:border-green-500 focus:ring-2 focus:ring-green-500"
                 >
-                  {DOC_TYPES.map((type) => (
-                    <option key={type.value} value={type.value}>
-                      {type.label}
-                    </option>
+                  {DOC_TYPE_CATEGORIES.map((category) => (
+                    <optgroup key={category.label} label={category.label}>
+                      {category.types.map((type) => (
+                        <option key={type.value} value={type.value}>
+                          {type.label}
+                        </option>
+                      ))}
+                    </optgroup>
                   ))}
                 </select>
               </div>
