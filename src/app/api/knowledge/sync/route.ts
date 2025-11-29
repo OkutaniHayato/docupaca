@@ -1,12 +1,17 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { adminAuth, adminDb } from '@/config/firebase-admin';
 import { FieldValue, Timestamp } from 'firebase-admin/firestore';
+import {
+  uploadTextContent,
+  deleteFile,
+  waitForFileProcessing,
+} from '@/lib/gemini-file-api';
 
 /**
  * ナレッジ同期APIエンドポイント
  *
- * orgLearningDocsのsyncStatusを更新し、同期履歴を記録します。
- * 実際のGemini File Search同期は将来実装予定です。
+ * orgLearningDocsをGemini File APIにアップロードし、
+ * syncStatusとfileIdを更新します。
  */
 export async function POST(request: NextRequest) {
   try {
@@ -85,9 +90,7 @@ export async function POST(request: NextRequest) {
     const syncedDocIds: string[] = [];
     const failedDocs: Array<{ docId: string; error: string }> = [];
 
-    // 各ドキュメントを同期（現在はステータス更新のみ）
-    const batch = db.batch();
-
+    // 各ドキュメントを同期
     for (const docSnapshot of docsSnapshot.docs) {
       const docId = docSnapshot.id;
       const docData = docSnapshot.data();
@@ -99,10 +102,39 @@ export async function POST(request: NextRequest) {
           continue;
         }
 
-        // 同期ステータスを更新
-        // 注: 実際のGemini File Search APIへの同期は将来実装
-        batch.update(docSnapshot.ref, {
+        // syncingステータスに更新
+        await docSnapshot.ref.update({
+          syncStatus: 'syncing',
+        });
+
+        // 既存のfileIdがある場合は削除を試みる
+        if (docData.fileId) {
+          try {
+            await deleteFile(docData.fileId);
+            console.log(`既存ファイル削除: ${docData.fileId}`);
+          } catch (deleteError) {
+            // 削除エラーは無視（既に削除済みの可能性）
+            console.log(`既存ファイル削除スキップ: ${docData.fileId}`, deleteError);
+          }
+        }
+
+        // Gemini File APIにアップロード
+        const displayName = `[org:${orgId}] ${docData.title} (${docId})`;
+        const uploadResult = await uploadTextContent(
+          docData.content,
+          displayName,
+          docId
+        );
+
+        // ファイル処理完了を待機
+        await waitForFileProcessing(uploadResult.name, 30000);
+
+        console.log(`ファイルアップロード成功: ${uploadResult.name}`);
+
+        // 成功ステータスに更新
+        await docSnapshot.ref.update({
           syncStatus: 'synced',
+          fileId: uploadResult.name,
           syncedAt: FieldValue.serverTimestamp(),
           syncError: null,
           syncRetryCount: 0,
@@ -112,20 +144,18 @@ export async function POST(request: NextRequest) {
         stats.syncedDocs++;
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+        console.error(`同期エラー (${docId}):`, errorMessage);
         failedDocs.push({ docId, error: errorMessage });
         stats.failedDocs++;
 
-        // 失敗ステータスを更新
-        batch.update(docSnapshot.ref, {
+        // 失敗ステータスに更新
+        await docSnapshot.ref.update({
           syncStatus: 'failed',
           syncError: errorMessage,
           syncRetryCount: FieldValue.increment(1),
         });
       }
     }
-
-    // バッチ更新を実行
-    await batch.commit();
 
     const durationMs = Date.now() - startTime;
 

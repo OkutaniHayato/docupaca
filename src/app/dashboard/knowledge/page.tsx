@@ -40,6 +40,8 @@ import {
   File,
   FileSpreadsheet,
   Image,
+  Database,
+  ExternalLink,
 } from 'lucide-react';
 
 interface OrgLearningDocWithId extends OrgLearningDoc {
@@ -48,6 +50,23 @@ interface OrgLearningDocWithId extends OrgLearningDoc {
 
 interface OrganizationWithId extends Organization {
   id: string;
+}
+
+// Geminiファイル情報
+interface GeminiFileInfo {
+  name: string;
+  displayName: string;
+  mimeType: string;
+  sizeBytes: string;
+  createTime: string;
+  expirationTime: string;
+  state: string;
+  uri: string;
+  linkedDoc: {
+    docId: string;
+    title: string;
+    syncStatus: string;
+  } | null;
 }
 
 // ドキュメントタイプの定義
@@ -84,6 +103,14 @@ export default function KnowledgePage() {
   const [isSaving, setIsSaving] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
   const [syncMessage, setSyncMessage] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+
+  // メインタブ（ナレッジ一覧 / ストア状況）
+  const [mainTab, setMainTab] = useState<'knowledge' | 'store'>('knowledge');
+
+  // ストア状況用の状態
+  const [geminiFiles, setGeminiFiles] = useState<GeminiFileInfo[]>([]);
+  const [isLoadingFiles, setIsLoadingFiles] = useState(false);
+  const [filesError, setFilesError] = useState<string | null>(null);
 
   // フィルタ
   const [filterType, setFilterType] = useState<OrgLearningDocType | ''>('');
@@ -447,6 +474,10 @@ export default function KnowledgePage() {
           type: 'success',
           message: `同期完了: ${data.result.stats.syncedDocs}件成功, ${data.result.stats.failedDocs}件失敗`,
         });
+        // ストア状況タブが開いている場合は更新
+        if (mainTab === 'store') {
+          loadGeminiFiles();
+        }
       } else {
         setSyncMessage({
           type: 'error',
@@ -462,6 +493,77 @@ export default function KnowledgePage() {
     } finally {
       setIsSyncing(false);
       setTimeout(() => setSyncMessage(null), 5000);
+    }
+  };
+
+  // Geminiファイル一覧を取得
+  const loadGeminiFiles = useCallback(async () => {
+    if (!currentUser || !selectedOrgId) return;
+
+    setIsLoadingFiles(true);
+    setFilesError(null);
+
+    try {
+      const token = await currentUser.getIdToken();
+      const response = await fetch(
+        `/api/knowledge/files?orgId=${selectedOrgId}`,
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        }
+      );
+
+      const data = await response.json();
+
+      if (data.success) {
+        setGeminiFiles(data.files);
+      } else {
+        setFilesError(data.error || 'ファイル一覧の取得に失敗しました');
+      }
+    } catch (error) {
+      console.error('ファイル一覧取得エラー:', error);
+      setFilesError('ファイル一覧の取得に失敗しました');
+    } finally {
+      setIsLoadingFiles(false);
+    }
+  }, [currentUser, selectedOrgId]);
+
+  // ストアタブに切り替えた時にファイル一覧を読み込み
+  useEffect(() => {
+    if (mainTab === 'store' && selectedOrgId) {
+      loadGeminiFiles();
+    }
+  }, [mainTab, selectedOrgId, loadGeminiFiles]);
+
+  // Geminiファイルを削除
+  const handleDeleteGeminiFile = async (fileName: string) => {
+    if (!currentUser) return;
+    if (!confirm('このファイルをGemini File APIから削除しますか？')) return;
+
+    try {
+      const token = await currentUser.getIdToken();
+      const response = await fetch(
+        `/api/knowledge/files?fileName=${encodeURIComponent(fileName)}`,
+        {
+          method: 'DELETE',
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        }
+      );
+
+      const data = await response.json();
+
+      if (data.success) {
+        // 一覧を再読み込み
+        loadGeminiFiles();
+      } else {
+        alert(data.error || '削除に失敗しました');
+      }
+    } catch (error) {
+      console.error('ファイル削除エラー:', error);
+      alert('削除に失敗しました');
     }
   };
 
@@ -583,63 +685,104 @@ export default function KnowledgePage() {
         </div>
       </div>
 
-      {/* 組織選択とフィルタ */}
-      <div className="mb-6 flex items-center gap-4">
-        <div className="flex items-center gap-2">
-          <Building2 className="h-5 w-5 text-gray-400" />
-          <select
-            value={selectedOrgId}
-            onChange={(e) => setSelectedOrgId(e.target.value)}
-            className="rounded-md border border-gray-300 px-3 py-2 text-gray-900 focus:border-green-500 focus:ring-2 focus:ring-green-500"
-          >
-            <option value="">組織を選択</option>
-            {organizations.map((org) => (
-              <option key={org.id} value={org.id}>
-                {org.name}
-              </option>
-            ))}
-          </select>
-        </div>
-
-        <div className="flex items-center gap-2">
-          <Filter className="h-5 w-5 text-gray-400" />
-          <select
-            value={filterType}
-            onChange={(e) => setFilterType(e.target.value as OrgLearningDocType | '')}
-            className="rounded-md border border-gray-300 px-3 py-2 text-gray-900 focus:border-green-500 focus:ring-2 focus:ring-green-500"
-          >
-            <option value="">すべてのタイプ</option>
-            {DOC_TYPES.map((type) => (
-              <option key={type.value} value={type.value}>
-                {type.label}
-              </option>
-            ))}
-          </select>
-        </div>
-
-        <span className="text-sm text-gray-500">
-          {filteredDocs.length}件のナレッジ
-        </span>
+      {/* 組織選択 */}
+      <div className="mb-4 flex items-center gap-2">
+        <Building2 className="h-5 w-5 text-gray-400" />
+        <select
+          value={selectedOrgId}
+          onChange={(e) => setSelectedOrgId(e.target.value)}
+          className="rounded-md border border-gray-300 px-3 py-2 text-gray-900 focus:border-green-500 focus:ring-2 focus:ring-green-500"
+        >
+          <option value="">組織を選択</option>
+          {organizations.map((org) => (
+            <option key={org.id} value={org.id}>
+              {org.name}
+            </option>
+          ))}
+        </select>
       </div>
 
-      {/* ドキュメント一覧 */}
-      {organizations.length === 0 ? (
-        <div className="text-center py-12 bg-white rounded-lg border border-gray-200">
-          <Building2 className="mx-auto h-12 w-12 text-gray-400" />
-          <h3 className="mt-4 text-lg font-medium text-gray-900">組織がありません</h3>
-          <p className="mt-2 text-sm text-gray-500">
-            先に「組織マスタ」から組織を作成してください
-          </p>
+      {/* メインタブ */}
+      <div className="mb-6 border-b border-gray-200">
+        <nav className="flex space-x-8">
+          <button
+            onClick={() => setMainTab('knowledge')}
+            className={`py-3 px-1 border-b-2 font-medium text-sm transition-colors ${
+              mainTab === 'knowledge'
+                ? 'border-green-600 text-green-600'
+                : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+            }`}
+          >
+            <BookOpen className="h-4 w-4 inline mr-2" />
+            ナレッジ一覧
+            <span className="ml-2 bg-gray-100 text-gray-600 py-0.5 px-2 rounded-full text-xs">
+              {docs.length}
+            </span>
+          </button>
+          <button
+            onClick={() => setMainTab('store')}
+            className={`py-3 px-1 border-b-2 font-medium text-sm transition-colors ${
+              mainTab === 'store'
+                ? 'border-green-600 text-green-600'
+                : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+            }`}
+          >
+            <Database className="h-4 w-4 inline mr-2" />
+            ストア状況（Gemini File API）
+            {geminiFiles.length > 0 && (
+              <span className="ml-2 bg-blue-100 text-blue-600 py-0.5 px-2 rounded-full text-xs">
+                {geminiFiles.length}
+              </span>
+            )}
+          </button>
+        </nav>
+      </div>
+
+      {/* ナレッジ一覧タブのフィルタ */}
+      {mainTab === 'knowledge' && (
+        <div className="mb-6 flex items-center gap-4">
+          <div className="flex items-center gap-2">
+            <Filter className="h-5 w-5 text-gray-400" />
+            <select
+              value={filterType}
+              onChange={(e) => setFilterType(e.target.value as OrgLearningDocType | '')}
+              className="rounded-md border border-gray-300 px-3 py-2 text-gray-900 focus:border-green-500 focus:ring-2 focus:ring-green-500"
+            >
+              <option value="">すべてのタイプ</option>
+              {DOC_TYPES.map((type) => (
+                <option key={type.value} value={type.value}>
+                  {type.label}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <span className="text-sm text-gray-500">
+            {filteredDocs.length}件のナレッジ
+          </span>
         </div>
-      ) : !selectedOrgId ? (
-        <div className="text-center py-12 bg-white rounded-lg border border-gray-200">
-          <Building2 className="mx-auto h-12 w-12 text-gray-400" />
-          <h3 className="mt-4 text-lg font-medium text-gray-900">組織を選択してください</h3>
-          <p className="mt-2 text-sm text-gray-500">
-            左上のセレクトから組織を選択してください
-          </p>
-        </div>
-      ) : filteredDocs.length === 0 ? (
+      )}
+
+      {/* ナレッジ一覧タブ */}
+      {mainTab === 'knowledge' && (
+        <>
+          {organizations.length === 0 ? (
+            <div className="text-center py-12 bg-white rounded-lg border border-gray-200">
+              <Building2 className="mx-auto h-12 w-12 text-gray-400" />
+              <h3 className="mt-4 text-lg font-medium text-gray-900">組織がありません</h3>
+              <p className="mt-2 text-sm text-gray-500">
+                先に「組織マスタ」から組織を作成してください
+              </p>
+            </div>
+          ) : !selectedOrgId ? (
+            <div className="text-center py-12 bg-white rounded-lg border border-gray-200">
+              <Building2 className="mx-auto h-12 w-12 text-gray-400" />
+              <h3 className="mt-4 text-lg font-medium text-gray-900">組織を選択してください</h3>
+              <p className="mt-2 text-sm text-gray-500">
+                左上のセレクトから組織を選択してください
+              </p>
+            </div>
+          ) : filteredDocs.length === 0 ? (
         <div className="text-center py-12 bg-white rounded-lg border border-gray-200">
           <BookOpen className="mx-auto h-12 w-12 text-gray-400" />
           <h3 className="mt-4 text-lg font-medium text-gray-900">ナレッジがありません</h3>
@@ -734,6 +877,172 @@ export default function KnowledgePage() {
               ))}
             </tbody>
           </table>
+        </div>
+          )}
+        </>
+      )}
+
+      {/* ストア状況タブ */}
+      {mainTab === 'store' && (
+        <div>
+          {!selectedOrgId ? (
+            <div className="text-center py-12 bg-white rounded-lg border border-gray-200">
+              <Building2 className="mx-auto h-12 w-12 text-gray-400" />
+              <h3 className="mt-4 text-lg font-medium text-gray-900">組織を選択してください</h3>
+              <p className="mt-2 text-sm text-gray-500">
+                左上のセレクトから組織を選択してください
+              </p>
+            </div>
+          ) : isLoadingFiles ? (
+            <div className="flex items-center justify-center py-12">
+              <Loader2 className="h-8 w-8 animate-spin text-green-600" />
+              <span className="ml-2 text-gray-600">Gemini File APIからファイル一覧を取得中...</span>
+            </div>
+          ) : filesError ? (
+            <div className="text-center py-12 bg-white rounded-lg border border-red-200">
+              <AlertCircle className="mx-auto h-12 w-12 text-red-400" />
+              <h3 className="mt-4 text-lg font-medium text-red-900">エラーが発生しました</h3>
+              <p className="mt-2 text-sm text-red-600">{filesError}</p>
+              <button
+                onClick={loadGeminiFiles}
+                className="mt-4 inline-flex items-center gap-2 px-4 py-2 bg-red-100 text-red-700 rounded-lg hover:bg-red-200"
+              >
+                <RefreshCw className="h-4 w-4" />
+                再読み込み
+              </button>
+            </div>
+          ) : geminiFiles.length === 0 ? (
+            <div className="text-center py-12 bg-white rounded-lg border border-gray-200">
+              <Database className="mx-auto h-12 w-12 text-gray-400" />
+              <h3 className="mt-4 text-lg font-medium text-gray-900">Gemini File APIにファイルがありません</h3>
+              <p className="mt-2 text-sm text-gray-500">
+                ナレッジを登録し「同期実行」を押すと、Gemini File APIにアップロードされます
+              </p>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              {/* 概要 */}
+              <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                <h3 className="text-sm font-medium text-blue-800 mb-2">Gemini File API ストア概要</h3>
+                <div className="grid grid-cols-3 gap-4 text-sm">
+                  <div>
+                    <span className="text-blue-600">登録ファイル数:</span>{' '}
+                    <span className="font-semibold text-blue-900">{geminiFiles.length}件</span>
+                  </div>
+                  <div>
+                    <span className="text-blue-600">アクティブ:</span>{' '}
+                    <span className="font-semibold text-blue-900">
+                      {geminiFiles.filter(f => f.state === 'ACTIVE').length}件
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-blue-600">処理中:</span>{' '}
+                    <span className="font-semibold text-blue-900">
+                      {geminiFiles.filter(f => f.state === 'PROCESSING').length}件
+                    </span>
+                  </div>
+                </div>
+                <p className="mt-2 text-xs text-blue-600">
+                  ※ Gemini File APIのファイルは48時間後に自動削除されます。定期的な再同期が必要です。
+                </p>
+              </div>
+
+              {/* ファイル一覧テーブル */}
+              <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
+                <div className="flex items-center justify-between px-6 py-3 bg-gray-50 border-b">
+                  <h3 className="text-sm font-medium text-gray-700">Gemini File API 登録ファイル一覧</h3>
+                  <button
+                    onClick={loadGeminiFiles}
+                    className="text-sm text-gray-600 hover:text-gray-800 flex items-center gap-1"
+                  >
+                    <RefreshCw className="h-4 w-4" />
+                    更新
+                  </button>
+                </div>
+                <table className="min-w-full divide-y divide-gray-200">
+                  <thead className="bg-gray-50">
+                    <tr>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        ファイル名 / 表示名
+                      </th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        状態
+                      </th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        サイズ
+                      </th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        有効期限
+                      </th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        紐付けナレッジ
+                      </th>
+                      <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        操作
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody className="bg-white divide-y divide-gray-200">
+                    {geminiFiles.map((file) => (
+                      <tr key={file.name} className="hover:bg-gray-50">
+                        <td className="px-6 py-4">
+                          <div>
+                            <p className="text-sm font-medium text-gray-900 truncate max-w-xs" title={file.displayName}>
+                              {file.displayName}
+                            </p>
+                            <p className="text-xs text-gray-500 font-mono truncate max-w-xs" title={file.name}>
+                              {file.name}
+                            </p>
+                          </div>
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap">
+                          <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                            file.state === 'ACTIVE'
+                              ? 'bg-green-100 text-green-800'
+                              : file.state === 'PROCESSING'
+                              ? 'bg-yellow-100 text-yellow-800'
+                              : 'bg-red-100 text-red-800'
+                          }`}>
+                            {file.state === 'ACTIVE' && <CheckCircle className="h-3 w-3 mr-1" />}
+                            {file.state === 'PROCESSING' && <Loader2 className="h-3 w-3 mr-1 animate-spin" />}
+                            {file.state === 'FAILED' && <AlertCircle className="h-3 w-3 mr-1" />}
+                            {file.state}
+                          </span>
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                          {formatFileSize(parseInt(file.sizeBytes || '0', 10))}
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap">
+                          <div className="text-sm text-gray-500">
+                            {file.expirationTime ? new Date(file.expirationTime).toLocaleString('ja-JP') : '-'}
+                          </div>
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap">
+                          {file.linkedDoc ? (
+                            <div className="flex items-center gap-1">
+                              <CheckCircle className="h-4 w-4 text-green-500" />
+                              <span className="text-sm text-gray-900">{file.linkedDoc.title}</span>
+                            </div>
+                          ) : (
+                            <span className="text-sm text-gray-400">-</span>
+                          )}
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-right">
+                          <button
+                            onClick={() => handleDeleteGeminiFile(file.name)}
+                            className="text-red-600 hover:text-red-900"
+                            title="削除"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
         </div>
       )}
 
