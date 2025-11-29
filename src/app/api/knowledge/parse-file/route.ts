@@ -2,8 +2,6 @@ import { NextRequest, NextResponse } from 'next/server';
 import { adminAuth, getAdminApp } from '@/config/firebase-admin';
 import { getStorage } from 'firebase-admin/storage';
 import { GoogleGenerativeAI } from '@google/generative-ai';
-import * as XLSX from 'xlsx';
-import { parse as csvParse } from 'csv-parse/sync';
 
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || '';
 const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
@@ -27,8 +25,10 @@ async function parsePdf(buffer: Buffer): Promise<string> {
 /**
  * Excelファイルからテキストを抽出
  */
-function parseExcel(buffer: Buffer): string {
+async function parseExcel(buffer: Buffer): Promise<string> {
   try {
+    // 動的インポートでxlsxを読み込み
+    const XLSX = await import('xlsx');
     const workbook = XLSX.read(buffer, { type: 'buffer' });
     const results: string[] = [];
 
@@ -51,9 +51,12 @@ function parseExcel(buffer: Buffer): string {
 /**
  * CSVファイルからテキストを抽出（マークダウンテーブル形式に変換）
  */
-function parseCsv(buffer: Buffer): string {
+async function parseCsv(buffer: Buffer): Promise<string> {
   try {
     const content = buffer.toString('utf-8');
+
+    // 動的インポートでcsv-parseを読み込み
+    const { parse: csvParse } = await import('csv-parse/sync');
 
     // CSVをパース
     const records = csvParse(content, {
@@ -187,10 +190,10 @@ async function parseFileByMimeType(
 
     case 'application/vnd.ms-excel':
     case 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet':
-      return parseExcel(buffer);
+      return await parseExcel(buffer);
 
     case 'text/csv':
-      return parseCsv(buffer);
+      return await parseCsv(buffer);
 
     case 'image/png':
     case 'image/jpeg':
@@ -205,9 +208,9 @@ async function parseFileByMimeType(
           return await parsePdf(buffer);
         case 'xlsx':
         case 'xls':
-          return parseExcel(buffer);
+          return await parseExcel(buffer);
         case 'csv':
-          return parseCsv(buffer);
+          return await parseCsv(buffer);
         case 'png':
         case 'jpg':
         case 'jpeg':
