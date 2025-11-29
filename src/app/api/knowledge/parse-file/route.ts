@@ -2,8 +2,6 @@ import { NextRequest, NextResponse } from 'next/server';
 import { adminAuth, getAdminApp } from '@/config/firebase-admin';
 import { getStorage } from 'firebase-admin/storage';
 import { GoogleGenerativeAI } from '@google/generative-ai';
-// eslint-disable-next-line @typescript-eslint/no-require-imports
-const pdfParse = require('pdf-parse');
 import * as XLSX from 'xlsx';
 import { parse as csvParse } from 'csv-parse/sync';
 
@@ -15,8 +13,11 @@ const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
  */
 async function parsePdf(buffer: Buffer): Promise<string> {
   try {
-    const data = await pdfParse(buffer);
-    return data.text.trim();
+    // 動的インポートでpdf-parseを読み込み
+    const { PDFParse } = await import('pdf-parse');
+    const pdfParser = new PDFParse({ data: new Uint8Array(buffer) });
+    const textResult = await pdfParser.getText();
+    return textResult.text.trim();
   } catch (error) {
     console.error('PDF解析エラー:', error);
     throw new Error('PDFファイルの解析に失敗しました');
