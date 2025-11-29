@@ -283,7 +283,7 @@ export default function KnowledgePage() {
       // Cloud Functionでテキスト抽出
       const token = await currentUser.getIdToken();
       const response = await fetch(
-        `${process.env.NEXT_PUBLIC_FUNCTIONS_URL || ''}/parseKnowledgeFileHttp`,
+        '/api/knowledge/parse-file',
         {
           method: 'POST',
           headers: {
@@ -426,7 +426,7 @@ export default function KnowledgePage() {
     try {
       const token = await currentUser.getIdToken();
       const response = await fetch(
-        `${process.env.NEXT_PUBLIC_FUNCTIONS_URL || ''}/syncOrgLearningDocsHttp`,
+        '/api/knowledge/sync',
         {
           method: 'POST',
           headers: {
