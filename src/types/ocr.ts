@@ -69,6 +69,23 @@ export interface OrgLearningDoc {
   /** 更新者UID */
   updatedBy?: string;
 
+  // === ソースファイル関連 ===
+
+  /** ソースタイプ: テキスト入力 or ファイルアップロード */
+  sourceType?: 'text' | 'file';
+
+  /** アップロードファイルのStorage URL */
+  sourceFileUrl?: string;
+
+  /** アップロードファイルの元ファイル名 */
+  sourceFileName?: string;
+
+  /** アップロードファイルのMIMEタイプ */
+  sourceFileMimeType?: string;
+
+  /** アップロードファイルのサイズ（バイト） */
+  sourceFileSize?: number;
+
   // === File Search 同期関連 ===
 
   /** Gemini File Search でのファイルID（同期後に設定） */

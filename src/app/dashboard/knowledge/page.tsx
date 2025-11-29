@@ -1,8 +1,8 @@
 "use client";
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useAuth } from '@/context/AuthContext';
-import { db } from '@/config/firebase';
+import { db, storage } from '@/config/firebase';
 import {
   collection,
   query,
@@ -15,6 +15,7 @@ import {
   doc,
   serverTimestamp,
 } from 'firebase/firestore';
+import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import {
   OrgLearningDoc,
   OrgLearningDocType,
@@ -35,6 +36,10 @@ import {
   FileText,
   Building2,
   Filter,
+  Upload,
+  File,
+  FileSpreadsheet,
+  Image,
 } from 'lucide-react';
 
 interface OrgLearningDocWithId extends OrgLearningDoc {
@@ -57,6 +62,19 @@ const DOC_TYPES: { value: OrgLearningDocType; label: string }[] = [
   { value: 'other', label: 'その他' },
 ];
 
+// サポートするファイルタイプ
+const SUPPORTED_FILE_TYPES = {
+  'application/pdf': { label: 'PDF', icon: FileText },
+  'text/csv': { label: 'CSV', icon: FileSpreadsheet },
+  'application/vnd.ms-excel': { label: 'Excel', icon: FileSpreadsheet },
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': { label: 'Excel', icon: FileSpreadsheet },
+  'image/png': { label: '画像', icon: Image },
+  'image/jpeg': { label: '画像', icon: Image },
+  'image/webp': { label: '画像', icon: Image },
+};
+
+const ACCEPTED_FILE_TYPES = Object.keys(SUPPORTED_FILE_TYPES).join(',');
+
 export default function KnowledgePage() {
   const { currentUser } = useAuth();
   const [organizations, setOrganizations] = useState<OrganizationWithId[]>([]);
@@ -73,6 +91,7 @@ export default function KnowledgePage() {
   // モーダル状態
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingDoc, setEditingDoc] = useState<OrgLearningDocWithId | null>(null);
+  const [inputMode, setInputMode] = useState<'text' | 'file'>('text');
   const [formData, setFormData] = useState<{
     type: OrgLearningDocType;
     title: string;
@@ -82,6 +101,14 @@ export default function KnowledgePage() {
     title: '',
     content: '',
   });
+
+  // ファイルアップロード状態
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [isUploading, setIsUploading] = useState(false);
+  const [isParsing, setIsParsing] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  const [isDragOver, setIsDragOver] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // 組織一覧を取得
   useEffect(() => {
@@ -142,22 +169,28 @@ export default function KnowledgePage() {
   // モーダルを開く（新規作成）
   const handleOpenCreate = () => {
     setEditingDoc(null);
+    setInputMode('text');
     setFormData({
       type: 'rule',
       title: '',
       content: '',
     });
+    setSelectedFile(null);
+    setUploadError(null);
     setIsModalOpen(true);
   };
 
   // モーダルを開く（編集）
   const handleOpenEdit = (docItem: OrgLearningDocWithId) => {
     setEditingDoc(docItem);
+    setInputMode(docItem.sourceType === 'file' ? 'file' : 'text');
     setFormData({
       type: docItem.type,
       title: docItem.title,
       content: docItem.content,
     });
+    setSelectedFile(null);
+    setUploadError(null);
     setIsModalOpen(true);
   };
 
@@ -165,48 +198,205 @@ export default function KnowledgePage() {
   const handleCloseModal = useCallback(() => {
     setIsModalOpen(false);
     setEditingDoc(null);
+    setInputMode('text');
     setFormData({
       type: 'rule',
       title: '',
       content: '',
     });
+    setSelectedFile(null);
+    setUploadError(null);
   }, []);
+
+  // ファイル選択ハンドラ
+  const handleFileSelect = (file: File) => {
+    // ファイルタイプチェック
+    if (!Object.keys(SUPPORTED_FILE_TYPES).includes(file.type)) {
+      setUploadError('サポートされていないファイル形式です。PDF、CSV、Excel、画像ファイルをアップロードしてください。');
+      return;
+    }
+
+    // ファイルサイズチェック（10MB制限）
+    if (file.size > 10 * 1024 * 1024) {
+      setUploadError('ファイルサイズは10MB以下にしてください。');
+      return;
+    }
+
+    setSelectedFile(file);
+    setUploadError(null);
+
+    // タイトルが空の場合、ファイル名をセット
+    if (!formData.title) {
+      const nameWithoutExt = file.name.replace(/\.[^/.]+$/, '');
+      setFormData(prev => ({ ...prev, title: nameWithoutExt }));
+    }
+  };
+
+  // ドラッグ＆ドロップハンドラ
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragOver(true);
+  };
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragOver(false);
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragOver(false);
+    const file = e.dataTransfer.files[0];
+    if (file) {
+      handleFileSelect(file);
+    }
+  };
+
+  // ファイル入力変更ハンドラ
+  const handleFileInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      handleFileSelect(file);
+    }
+  };
+
+  // ファイルをアップロードしてテキスト抽出
+  const uploadAndParseFile = async (): Promise<{ url: string; content: string }> => {
+    if (!selectedFile || !currentUser || !selectedOrgId) {
+      throw new Error('ファイルまたはユーザー情報が不足しています');
+    }
+
+    setIsUploading(true);
+
+    try {
+      // Firebase Storageにアップロード
+      const timestamp = Date.now();
+      const storagePath = `knowledge/${selectedOrgId}/${timestamp}_${selectedFile.name}`;
+      const storageRef = ref(storage, storagePath);
+
+      await uploadBytes(storageRef, selectedFile);
+      const downloadUrl = await getDownloadURL(storageRef);
+
+      setIsUploading(false);
+      setIsParsing(true);
+
+      // Cloud Functionでテキスト抽出
+      const token = await currentUser.getIdToken();
+      const response = await fetch(
+        `${process.env.NEXT_PUBLIC_FUNCTIONS_URL || ''}/parseKnowledgeFileHttp`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({
+            fileUrl: downloadUrl,
+            fileName: selectedFile.name,
+            mimeType: selectedFile.type,
+            orgId: selectedOrgId,
+          }),
+        }
+      );
+
+      const data = await response.json();
+
+      if (!data.success) {
+        throw new Error(data.error || 'ファイルの解析に失敗しました');
+      }
+
+      return {
+        url: downloadUrl,
+        content: data.content,
+      };
+    } finally {
+      setIsUploading(false);
+      setIsParsing(false);
+    }
+  };
 
   // 保存
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!currentUser || !selectedOrgId || !formData.title.trim() || !formData.content.trim()) return;
+    if (!currentUser || !selectedOrgId || !formData.title.trim()) return;
+
+    // テキストモードの場合はコンテンツ必須
+    if (inputMode === 'text' && !formData.content.trim()) return;
+    // ファイルモードの場合はファイル選択必須（編集時は除く）
+    if (inputMode === 'file' && !selectedFile && !editingDoc) return;
 
     setIsSaving(true);
 
     try {
+      let content = formData.content;
+      let sourceFileUrl: string | undefined;
+      let sourceFileName: string | undefined;
+      let sourceFileMimeType: string | undefined;
+      let sourceFileSize: number | undefined;
+
+      // ファイルモードでファイルが選択されている場合
+      if (inputMode === 'file' && selectedFile) {
+        const result = await uploadAndParseFile();
+        content = result.content;
+        sourceFileUrl = result.url;
+        sourceFileName = selectedFile.name;
+        sourceFileMimeType = selectedFile.type;
+        sourceFileSize = selectedFile.size;
+      }
+
       if (editingDoc) {
         // 更新
-        await updateDoc(doc(db, 'orgLearningDocs', editingDoc.id), {
+        const updateData: Record<string, unknown> = {
           type: formData.type,
           title: formData.title.trim(),
-          content: formData.content.trim(),
+          content: content.trim(),
           updatedAt: serverTimestamp(),
           updatedBy: currentUser.uid,
-          syncStatus: 'pending', // 更新したら再同期が必要
-        });
+          syncStatus: 'pending',
+          sourceType: inputMode,
+        };
+
+        // ファイル情報がある場合は追加
+        if (sourceFileUrl) {
+          updateData.sourceFileUrl = sourceFileUrl;
+          updateData.sourceFileName = sourceFileName;
+          updateData.sourceFileMimeType = sourceFileMimeType;
+          updateData.sourceFileSize = sourceFileSize;
+        }
+
+        await updateDoc(doc(db, 'orgLearningDocs', editingDoc.id), updateData);
       } else {
         // 新規作成
-        await addDoc(collection(db, 'orgLearningDocs'), {
+        const newDoc: Record<string, unknown> = {
           orgId: selectedOrgId,
           type: formData.type,
           title: formData.title.trim(),
-          content: formData.content.trim(),
+          content: content.trim(),
           createdAt: serverTimestamp(),
           updatedAt: serverTimestamp(),
           createdBy: currentUser.uid,
           syncStatus: 'pending',
-        });
+          sourceType: inputMode,
+        };
+
+        // ファイル情報がある場合は追加
+        if (sourceFileUrl) {
+          newDoc.sourceFileUrl = sourceFileUrl;
+          newDoc.sourceFileName = sourceFileName;
+          newDoc.sourceFileMimeType = sourceFileMimeType;
+          newDoc.sourceFileSize = sourceFileSize;
+        }
+
+        await addDoc(collection(db, 'orgLearningDocs'), newDoc);
       }
       handleCloseModal();
     } catch (error) {
       console.error('保存エラー:', error);
-      alert('保存に失敗しました');
+      if (error instanceof Error) {
+        setUploadError(error.message);
+      } else {
+        alert('保存に失敗しました');
+      }
     } finally {
       setIsSaving(false);
     }
@@ -271,7 +461,6 @@ export default function KnowledgePage() {
       });
     } finally {
       setIsSyncing(false);
-      // 3秒後にメッセージをクリア
       setTimeout(() => setSyncMessage(null), 5000);
     }
   };
@@ -311,11 +500,22 @@ export default function KnowledgePage() {
     return DOC_TYPES.find(t => t.value === type)?.label || type;
   };
 
+  // ソースタイプのアイコンを取得
+  const getSourceTypeIcon = (docItem: OrgLearningDocWithId) => {
+    if (docItem.sourceType === 'file' && docItem.sourceFileMimeType) {
+      const fileType = SUPPORTED_FILE_TYPES[docItem.sourceFileMimeType as keyof typeof SUPPORTED_FILE_TYPES];
+      if (fileType) {
+        const IconComponent = fileType.icon;
+        return <IconComponent className="h-5 w-5 text-gray-400 mr-3" />;
+      }
+    }
+    return <FileText className="h-5 w-5 text-gray-400 mr-3" />;
+  };
+
   // 日時フォーマット
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const formatDate = (date: any) => {
     if (!date) return '-';
-    // Firestoreの Timestamp は toDate() メソッドを持つ
     const d = date.toDate ? date.toDate() : (date instanceof Date ? date : new Date(date));
     return d.toLocaleString('ja-JP', {
       year: 'numeric',
@@ -324,6 +524,13 @@ export default function KnowledgePage() {
       hour: '2-digit',
       minute: '2-digit',
     });
+  };
+
+  // ファイルサイズフォーマット
+  const formatFileSize = (bytes: number) => {
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
   };
 
   if (isLoading) {
@@ -467,11 +674,17 @@ export default function KnowledgePage() {
                 <tr key={docItem.id} className="hover:bg-gray-50">
                   <td className="px-6 py-4">
                     <div className="flex items-center">
-                      <FileText className="h-5 w-5 text-gray-400 mr-3" />
+                      {getSourceTypeIcon(docItem)}
                       <div>
                         <span className="text-sm font-medium text-gray-900">
                           {docItem.title}
                         </span>
+                        {docItem.sourceType === 'file' && docItem.sourceFileName && (
+                          <p className="text-xs text-blue-600">
+                            📎 {docItem.sourceFileName}
+                            {docItem.sourceFileSize && ` (${formatFileSize(docItem.sourceFileSize)})`}
+                          </p>
+                        )}
                         <p className="text-xs text-gray-500 truncate max-w-xs">
                           {docItem.content.substring(0, 50)}...
                         </p>
@@ -527,7 +740,7 @@ export default function KnowledgePage() {
       {/* モーダル */}
       {isModalOpen && (
         <div className="fixed inset-0 flex items-center justify-center z-50 px-8" style={{ backgroundColor: 'rgba(0, 0, 0, 0.1)' }}>
-          <div className="bg-white rounded-lg shadow-xl w-full max-w-lg max-h-[90vh] overflow-y-auto">
+          <div className="bg-white rounded-lg shadow-xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between px-6 py-4 border-b">
               <div>
                 <h2 className="text-lg font-semibold text-gray-900">
@@ -547,6 +760,34 @@ export default function KnowledgePage() {
             </div>
 
             <form onSubmit={handleSave} className="p-6 space-y-4">
+              {/* 入力モード切替タブ */}
+              <div className="flex border-b border-gray-200">
+                <button
+                  type="button"
+                  onClick={() => setInputMode('text')}
+                  className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+                    inputMode === 'text'
+                      ? 'border-green-600 text-green-600'
+                      : 'border-transparent text-gray-500 hover:text-gray-700'
+                  }`}
+                >
+                  <FileText className="h-4 w-4 inline mr-2" />
+                  テキスト入力
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setInputMode('file')}
+                  className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+                    inputMode === 'file'
+                      ? 'border-green-600 text-green-600'
+                      : 'border-transparent text-gray-500 hover:text-gray-700'
+                  }`}
+                >
+                  <Upload className="h-4 w-4 inline mr-2" />
+                  ファイルアップロード
+                </button>
+              </div>
+
               <div>
                 <label htmlFor="type" className="block text-sm font-medium text-gray-700">
                   タイプ <span className="text-red-500">*</span>
@@ -580,18 +821,20 @@ export default function KnowledgePage() {
                 />
               </div>
 
-              <div>
-                <label htmlFor="content" className="block text-sm font-medium text-gray-700">
-                  コンテンツ <span className="text-red-500">*</span>
-                  <span className="text-xs text-gray-500 ml-2">(マークダウン形式推奨)</span>
-                </label>
-                <textarea
-                  id="content"
-                  value={formData.content}
-                  onChange={(e) => setFormData(prev => ({ ...prev, content: e.target.value }))}
-                  required
-                  rows={12}
-                  placeholder={`例:
+              {inputMode === 'text' ? (
+                // テキスト入力モード
+                <div>
+                  <label htmlFor="content" className="block text-sm font-medium text-gray-700">
+                    コンテンツ <span className="text-red-500">*</span>
+                    <span className="text-xs text-gray-500 ml-2">(マークダウン形式推奨)</span>
+                  </label>
+                  <textarea
+                    id="content"
+                    value={formData.content}
+                    onChange={(e) => setFormData(prev => ({ ...prev, content: e.target.value }))}
+                    required
+                    rows={12}
+                    placeholder={`例:
 # 顧客コード割当ルール
 
 ## 基本ルール
@@ -600,9 +843,105 @@ export default function KnowledgePage() {
 
 ## 例外ルール
 - 「ABC商事」は「株式会社ABC」とは異なる顧客（コード: C003）`}
-                  className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 text-gray-900 placeholder-gray-500 shadow-sm focus:border-green-500 focus:ring-2 focus:ring-green-500 font-mono text-sm"
-                />
-              </div>
+                    className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 text-gray-900 placeholder-gray-500 shadow-sm focus:border-green-500 focus:ring-2 focus:ring-green-500 font-mono text-sm"
+                  />
+                </div>
+              ) : (
+                // ファイルアップロードモード
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    ファイル <span className="text-red-500">*</span>
+                    <span className="text-xs text-gray-500 ml-2">(PDF, CSV, Excel, 画像)</span>
+                  </label>
+
+                  {/* ドロップゾーン */}
+                  <div
+                    onDragOver={handleDragOver}
+                    onDragLeave={handleDragLeave}
+                    onDrop={handleDrop}
+                    onClick={() => fileInputRef.current?.click()}
+                    className={`border-2 border-dashed rounded-lg p-8 text-center cursor-pointer transition-colors ${
+                      isDragOver
+                        ? 'border-green-500 bg-green-50'
+                        : selectedFile
+                        ? 'border-green-300 bg-green-50'
+                        : 'border-gray-300 hover:border-gray-400'
+                    }`}
+                  >
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      accept={ACCEPTED_FILE_TYPES}
+                      onChange={handleFileInputChange}
+                      className="hidden"
+                    />
+
+                    {selectedFile ? (
+                      <div className="flex items-center justify-center gap-3">
+                        <File className="h-8 w-8 text-green-600" />
+                        <div className="text-left">
+                          <p className="text-sm font-medium text-gray-900">{selectedFile.name}</p>
+                          <p className="text-xs text-gray-500">{formatFileSize(selectedFile.size)}</p>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setSelectedFile(null);
+                          }}
+                          className="ml-2 text-gray-400 hover:text-gray-600"
+                        >
+                          <X className="h-5 w-5" />
+                        </button>
+                      </div>
+                    ) : (
+                      <>
+                        <Upload className="mx-auto h-12 w-12 text-gray-400" />
+                        <p className="mt-2 text-sm text-gray-600">
+                          ドラッグ＆ドロップ または クリックしてファイルを選択
+                        </p>
+                        <p className="mt-1 text-xs text-gray-500">
+                          PDF, CSV, Excel (.xlsx), 画像 (PNG, JPEG) - 最大10MB
+                        </p>
+                      </>
+                    )}
+                  </div>
+
+                  {/* エラーメッセージ */}
+                  {uploadError && (
+                    <div className="mt-2 p-3 bg-red-50 border border-red-200 rounded-md">
+                      <p className="text-sm text-red-600">{uploadError}</p>
+                    </div>
+                  )}
+
+                  {/* 編集時の既存ファイル情報 */}
+                  {editingDoc?.sourceType === 'file' && editingDoc.sourceFileName && !selectedFile && (
+                    <div className="mt-3 p-3 bg-gray-50 rounded-md">
+                      <p className="text-sm text-gray-600">
+                        現在のファイル: <span className="font-medium">{editingDoc.sourceFileName}</span>
+                      </p>
+                      <p className="text-xs text-gray-500 mt-1">
+                        新しいファイルを選択すると置き換えられます
+                      </p>
+                    </div>
+                  )}
+
+                  {/* 抽出されたコンテンツのプレビュー（編集モードでファイルアップロード済みの場合） */}
+                  {editingDoc?.sourceType === 'file' && formData.content && (
+                    <div className="mt-3">
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        抽出されたテキスト（編集可能）
+                      </label>
+                      <textarea
+                        value={formData.content}
+                        onChange={(e) => setFormData(prev => ({ ...prev, content: e.target.value }))}
+                        rows={8}
+                        className="block w-full rounded-md border border-gray-300 px-3 py-2 text-gray-900 shadow-sm focus:border-green-500 focus:ring-2 focus:ring-green-500 font-mono text-sm"
+                      />
+                    </div>
+                  )}
+                </div>
+              )}
 
               <div className="flex justify-end gap-3 pt-4">
                 <button
@@ -614,10 +953,27 @@ export default function KnowledgePage() {
                 </button>
                 <button
                   type="submit"
-                  disabled={isSaving || !formData.title.trim() || !formData.content.trim()}
+                  disabled={
+                    isSaving ||
+                    isUploading ||
+                    isParsing ||
+                    !formData.title.trim() ||
+                    (inputMode === 'text' && !formData.content.trim()) ||
+                    (inputMode === 'file' && !selectedFile && !editingDoc)
+                  }
                   className="flex items-center gap-2 rounded-lg bg-green-700 py-2 px-4 font-semibold text-white hover:bg-green-600 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  {isSaving ? (
+                  {isUploading ? (
+                    <>
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      アップロード中...
+                    </>
+                  ) : isParsing ? (
+                    <>
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      解析中...
+                    </>
+                  ) : isSaving ? (
                     <>
                       <Loader2 className="h-4 w-4 animate-spin" />
                       保存中...
