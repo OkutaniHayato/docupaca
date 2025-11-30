@@ -41,32 +41,48 @@ import {
   FileSpreadsheet,
   Image,
   Database,
-  ExternalLink,
+  Check,
+  Square,
 } from 'lucide-react';
 
 interface OrgLearningDocWithId extends OrgLearningDoc {
   id: string;
+  syncEnabled?: boolean;
 }
 
 interface OrganizationWithId extends Organization {
   id: string;
+  fileSearchStoreId?: string;
 }
 
-// Geminiファイル情報
-interface GeminiFileInfo {
+// File Search Store Document情報
+interface StoreDocument {
   name: string;
-  displayName: string;
-  mimeType: string;
-  sizeBytes: string;
-  createTime: string;
-  expirationTime: string;
-  state: string;
-  uri: string;
+  displayName?: string;
+  mimeType?: string;
+  sizeBytes?: string;
+  createTime?: string;
+  updateTime?: string;
+  state?: string;
+  customMetadata?: Array<{ key: string; stringValue?: string }>;
   linkedDoc: {
     docId: string;
     title: string;
     syncStatus: string;
+    syncEnabled: boolean;
   } | null;
+}
+
+// Store情報
+interface StoreInfo {
+  name: string;
+  displayName?: string;
+  activeDocumentsCount?: string;
+  pendingDocumentsCount?: string;
+  failedDocumentsCount?: string;
+  sizeBytes?: string;
+  createTime?: string;
+  updateTime?: string;
 }
 
 // ドキュメントタイプの定義
@@ -108,7 +124,8 @@ export default function KnowledgePage() {
   const [mainTab, setMainTab] = useState<'knowledge' | 'store'>('knowledge');
 
   // ストア状況用の状態
-  const [geminiFiles, setGeminiFiles] = useState<GeminiFileInfo[]>([]);
+  const [storeInfo, setStoreInfo] = useState<StoreInfo | null>(null);
+  const [storeDocuments, setStoreDocuments] = useState<StoreDocument[]>([]);
   const [isLoadingFiles, setIsLoadingFiles] = useState(false);
   const [filesError, setFilesError] = useState<string | null>(null);
 
@@ -234,6 +251,20 @@ export default function KnowledgePage() {
     setSelectedFile(null);
     setUploadError(null);
   }, []);
+
+  // syncEnabledの切り替え
+  const handleToggleSyncEnabled = async (docItem: OrgLearningDocWithId) => {
+    const newValue = !(docItem.syncEnabled !== false); // デフォルトはtrue
+    try {
+      await updateDoc(doc(db, 'orgLearningDocs', docItem.id), {
+        syncEnabled: newValue,
+        // syncEnabledをfalseにした場合はpendingに戻す
+        ...(newValue === false ? { syncStatus: 'pending' } : {}),
+      });
+    } catch (error) {
+      console.error('syncEnabled更新エラー:', error);
+    }
+  };
 
   // ファイル選択ハンドラ
   const handleFileSelect = (file: File) => {
@@ -393,7 +424,7 @@ export default function KnowledgePage() {
 
         await updateDoc(doc(db, 'orgLearningDocs', editingDoc.id), updateData);
       } else {
-        // 新規作成
+        // 新規作成（デフォルトでsyncEnabled: true）
         const newDoc: Record<string, unknown> = {
           orgId: selectedOrgId,
           type: formData.type,
@@ -404,6 +435,7 @@ export default function KnowledgePage() {
           createdBy: currentUser.uid,
           syncStatus: 'pending',
           sourceType: inputMode,
+          syncEnabled: true,
         };
 
         // ファイル情報がある場合は追加
@@ -431,7 +463,7 @@ export default function KnowledgePage() {
 
   // 削除
   const handleDelete = async (docItem: OrgLearningDocWithId) => {
-    if (!confirm(`「${docItem.title}」を削除しますか？\n\n※File Searchからも削除されます。`)) {
+    if (!confirm(`「${docItem.title}」を削除しますか？\n\n※File Search Storeからも削除されます。`)) {
       return;
     }
 
@@ -476,7 +508,7 @@ export default function KnowledgePage() {
         });
         // ストア状況タブが開いている場合は更新
         if (mainTab === 'store') {
-          loadGeminiFiles();
+          loadStoreData();
         }
       } else {
         setSyncMessage({
@@ -496,8 +528,8 @@ export default function KnowledgePage() {
     }
   };
 
-  // Geminiファイル一覧を取得
-  const loadGeminiFiles = useCallback(async () => {
+  // File Search Storeのデータを取得
+  const loadStoreData = useCallback(async () => {
     if (!currentUser || !selectedOrgId) return;
 
     setIsLoadingFiles(true);
@@ -517,34 +549,35 @@ export default function KnowledgePage() {
       const data = await response.json();
 
       if (data.success) {
-        setGeminiFiles(data.files);
+        setStoreInfo(data.store);
+        setStoreDocuments(data.documents || []);
       } else {
-        setFilesError(data.error || 'ファイル一覧の取得に失敗しました');
+        setFilesError(data.error || 'ストア情報の取得に失敗しました');
       }
     } catch (error) {
-      console.error('ファイル一覧取得エラー:', error);
-      setFilesError('ファイル一覧の取得に失敗しました');
+      console.error('ストア情報取得エラー:', error);
+      setFilesError('ストア情報の取得に失敗しました');
     } finally {
       setIsLoadingFiles(false);
     }
   }, [currentUser, selectedOrgId]);
 
-  // ストアタブに切り替えた時にファイル一覧を読み込み
+  // ストアタブに切り替えた時にデータを読み込み
   useEffect(() => {
     if (mainTab === 'store' && selectedOrgId) {
-      loadGeminiFiles();
+      loadStoreData();
     }
-  }, [mainTab, selectedOrgId, loadGeminiFiles]);
+  }, [mainTab, selectedOrgId, loadStoreData]);
 
-  // Geminiファイルを削除
-  const handleDeleteGeminiFile = async (fileName: string) => {
+  // Store Documentを削除
+  const handleDeleteStoreDocument = async (documentName: string) => {
     if (!currentUser) return;
-    if (!confirm('このファイルをGemini File APIから削除しますか？')) return;
+    if (!confirm('このドキュメントをFile Search Storeから削除しますか？')) return;
 
     try {
       const token = await currentUser.getIdToken();
       const response = await fetch(
-        `/api/knowledge/files?fileName=${encodeURIComponent(fileName)}`,
+        `/api/knowledge/files?documentName=${encodeURIComponent(documentName)}`,
         {
           method: 'DELETE',
           headers: {
@@ -557,12 +590,12 @@ export default function KnowledgePage() {
 
       if (data.success) {
         // 一覧を再読み込み
-        loadGeminiFiles();
+        loadStoreData();
       } else {
         alert(data.error || '削除に失敗しました');
       }
     } catch (error) {
-      console.error('ファイル削除エラー:', error);
+      console.error('ドキュメント削除エラー:', error);
       alert('削除に失敗しました');
     }
   };
@@ -702,40 +735,42 @@ export default function KnowledgePage() {
         </select>
       </div>
 
-      {/* メインタブ */}
-      <div className="mb-6 border-b border-gray-200">
-        <nav className="flex space-x-8">
-          <button
-            onClick={() => setMainTab('knowledge')}
-            className={`py-3 px-1 border-b-2 font-medium text-sm transition-colors ${
-              mainTab === 'knowledge'
-                ? 'border-green-600 text-green-600'
-                : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-            }`}
-          >
-            <BookOpen className="h-4 w-4 inline mr-2" />
-            ナレッジ一覧
-            <span className="ml-2 bg-gray-100 text-gray-600 py-0.5 px-2 rounded-full text-xs">
-              {docs.length}
+      {/* メインタブ - 背景色で明確化 */}
+      <div className="mb-6 bg-gray-100 rounded-lg p-1 inline-flex">
+        <button
+          onClick={() => setMainTab('knowledge')}
+          className={`py-2 px-4 rounded-md font-medium text-sm transition-all ${
+            mainTab === 'knowledge'
+              ? 'bg-white text-green-700 shadow-sm'
+              : 'text-gray-600 hover:text-gray-900'
+          }`}
+        >
+          <BookOpen className="h-4 w-4 inline mr-2" />
+          ナレッジ一覧
+          <span className={`ml-2 py-0.5 px-2 rounded-full text-xs ${
+            mainTab === 'knowledge' ? 'bg-green-100 text-green-700' : 'bg-gray-200 text-gray-600'
+          }`}>
+            {docs.length}
+          </span>
+        </button>
+        <button
+          onClick={() => setMainTab('store')}
+          className={`py-2 px-4 rounded-md font-medium text-sm transition-all ${
+            mainTab === 'store'
+              ? 'bg-white text-green-700 shadow-sm'
+              : 'text-gray-600 hover:text-gray-900'
+          }`}
+        >
+          <Database className="h-4 w-4 inline mr-2" />
+          ストア状況
+          {storeDocuments.length > 0 && (
+            <span className={`ml-2 py-0.5 px-2 rounded-full text-xs ${
+              mainTab === 'store' ? 'bg-blue-100 text-blue-700' : 'bg-gray-200 text-gray-600'
+            }`}>
+              {storeDocuments.length}
             </span>
-          </button>
-          <button
-            onClick={() => setMainTab('store')}
-            className={`py-3 px-1 border-b-2 font-medium text-sm transition-colors ${
-              mainTab === 'store'
-                ? 'border-green-600 text-green-600'
-                : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-            }`}
-          >
-            <Database className="h-4 w-4 inline mr-2" />
-            ストア状況（Gemini File API）
-            {geminiFiles.length > 0 && (
-              <span className="ml-2 bg-blue-100 text-blue-600 py-0.5 px-2 rounded-full text-xs">
-                {geminiFiles.length}
-              </span>
-            )}
-          </button>
-        </nav>
+          )}
+        </button>
       </div>
 
       {/* ナレッジ一覧タブのフィルタ */}
@@ -759,6 +794,11 @@ export default function KnowledgePage() {
 
           <span className="text-sm text-gray-500">
             {filteredDocs.length}件のナレッジ
+            {docs.filter(d => d.syncEnabled !== false).length !== docs.length && (
+              <span className="ml-2 text-green-600">
+                （同期対象: {docs.filter(d => d.syncEnabled !== false).length}件）
+              </span>
+            )}
           </span>
         </div>
       )}
@@ -795,6 +835,9 @@ export default function KnowledgePage() {
           <table className="min-w-full divide-y divide-gray-200">
             <thead className="bg-gray-50">
               <tr>
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-12">
+                  同期
+                </th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                   タイトル
                 </th>
@@ -813,68 +856,94 @@ export default function KnowledgePage() {
               </tr>
             </thead>
             <tbody className="bg-white divide-y divide-gray-200">
-              {filteredDocs.map((docItem) => (
-                <tr key={docItem.id} className="hover:bg-gray-50">
-                  <td className="px-6 py-4">
-                    <div className="flex items-center">
-                      {getSourceTypeIcon(docItem)}
-                      <div>
-                        <span className="text-sm font-medium text-gray-900">
-                          {docItem.title}
-                        </span>
-                        {docItem.sourceType === 'file' && docItem.sourceFileName && (
-                          <p className="text-xs text-blue-600">
-                            📎 {docItem.sourceFileName}
-                            {docItem.sourceFileSize && ` (${formatFileSize(docItem.sourceFileSize)})`}
-                          </p>
+              {filteredDocs.map((docItem) => {
+                const isSyncEnabled = docItem.syncEnabled !== false;
+                return (
+                  <tr key={docItem.id} className={`hover:bg-gray-50 ${!isSyncEnabled ? 'opacity-60' : ''}`}>
+                    <td className="px-4 py-4">
+                      <button
+                        onClick={() => handleToggleSyncEnabled(docItem)}
+                        className={`p-1 rounded transition-colors ${
+                          isSyncEnabled
+                            ? 'text-green-600 hover:bg-green-50'
+                            : 'text-gray-400 hover:bg-gray-100'
+                        }`}
+                        title={isSyncEnabled ? '同期対象（クリックで解除）' : '同期対象外（クリックで有効化）'}
+                      >
+                        {isSyncEnabled ? (
+                          <Check className="h-5 w-5" />
+                        ) : (
+                          <Square className="h-5 w-5" />
                         )}
-                        <p className="text-xs text-gray-500 truncate max-w-xs">
-                          {docItem.content.substring(0, 50)}...
-                        </p>
+                      </button>
+                    </td>
+                    <td className="px-6 py-4">
+                      <div className="flex items-center">
+                        {getSourceTypeIcon(docItem)}
+                        <div>
+                          <span className="text-sm font-medium text-gray-900">
+                            {docItem.title}
+                          </span>
+                          {docItem.sourceType === 'file' && docItem.sourceFileName && (
+                            <p className="text-xs text-blue-600">
+                              {docItem.sourceFileName}
+                              {docItem.sourceFileSize && ` (${formatFileSize(docItem.sourceFileSize)})`}
+                            </p>
+                          )}
+                          <p className="text-xs text-gray-500 truncate max-w-xs">
+                            {docItem.content.substring(0, 50)}...
+                          </p>
+                        </div>
                       </div>
-                    </div>
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-800">
-                      {getTypeLabel(docItem.type)}
-                    </span>
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    <div className="flex items-center gap-2">
-                      {getSyncStatusIcon(docItem.syncStatus)}
-                      <span className="text-sm text-gray-600">
-                        {getSyncStatusLabel(docItem.syncStatus)}
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-800">
+                        {getTypeLabel(docItem.type)}
                       </span>
-                    </div>
-                    {docItem.syncError && (
-                      <p className="text-xs text-red-500 mt-1 truncate max-w-xs" title={docItem.syncError}>
-                        {docItem.syncError}
-                      </p>
-                    )}
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    <span className="text-sm text-gray-500">
-                      {formatDate(docItem.updatedAt)}
-                    </span>
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-right">
-                    <button
-                      onClick={() => handleOpenEdit(docItem)}
-                      className="text-green-600 hover:text-green-900 mr-3"
-                      title="編集"
-                    >
-                      <Pencil className="h-4 w-4" />
-                    </button>
-                    <button
-                      onClick={() => handleDelete(docItem)}
-                      className="text-red-600 hover:text-red-900"
-                      title="削除"
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </button>
-                  </td>
-                </tr>
-              ))}
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      <div className="flex items-center gap-2">
+                        {isSyncEnabled ? (
+                          <>
+                            {getSyncStatusIcon(docItem.syncStatus)}
+                            <span className="text-sm text-gray-600">
+                              {getSyncStatusLabel(docItem.syncStatus)}
+                            </span>
+                          </>
+                        ) : (
+                          <span className="text-sm text-gray-400">同期対象外</span>
+                        )}
+                      </div>
+                      {docItem.syncError && isSyncEnabled && (
+                        <p className="text-xs text-red-500 mt-1 truncate max-w-xs" title={docItem.syncError}>
+                          {docItem.syncError}
+                        </p>
+                      )}
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      <span className="text-sm text-gray-500">
+                        {formatDate(docItem.updatedAt)}
+                      </span>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-right">
+                      <button
+                        onClick={() => handleOpenEdit(docItem)}
+                        className="text-green-600 hover:text-green-900 mr-3"
+                        title="編集"
+                      >
+                        <Pencil className="h-4 w-4" />
+                      </button>
+                      <button
+                        onClick={() => handleDelete(docItem)}
+                        className="text-red-600 hover:text-red-900"
+                        title="削除"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
@@ -896,7 +965,7 @@ export default function KnowledgePage() {
           ) : isLoadingFiles ? (
             <div className="flex items-center justify-center py-12">
               <Loader2 className="h-8 w-8 animate-spin text-green-600" />
-              <span className="ml-2 text-gray-600">Gemini File APIからファイル一覧を取得中...</span>
+              <span className="ml-2 text-gray-600">File Search Storeからデータを取得中...</span>
             </div>
           ) : filesError ? (
             <div className="text-center py-12 bg-white rounded-lg border border-red-200">
@@ -904,143 +973,164 @@ export default function KnowledgePage() {
               <h3 className="mt-4 text-lg font-medium text-red-900">エラーが発生しました</h3>
               <p className="mt-2 text-sm text-red-600">{filesError}</p>
               <button
-                onClick={loadGeminiFiles}
+                onClick={loadStoreData}
                 className="mt-4 inline-flex items-center gap-2 px-4 py-2 bg-red-100 text-red-700 rounded-lg hover:bg-red-200"
               >
                 <RefreshCw className="h-4 w-4" />
                 再読み込み
               </button>
             </div>
-          ) : geminiFiles.length === 0 ? (
-            <div className="text-center py-12 bg-white rounded-lg border border-gray-200">
-              <Database className="mx-auto h-12 w-12 text-gray-400" />
-              <h3 className="mt-4 text-lg font-medium text-gray-900">Gemini File APIにファイルがありません</h3>
-              <p className="mt-2 text-sm text-gray-500">
-                ナレッジを登録し「同期実行」を押すと、Gemini File APIにアップロードされます
-              </p>
-            </div>
           ) : (
             <div className="space-y-4">
-              {/* 概要 */}
-              <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-                <h3 className="text-sm font-medium text-blue-800 mb-2">Gemini File API ストア概要</h3>
-                <div className="grid grid-cols-3 gap-4 text-sm">
-                  <div>
-                    <span className="text-blue-600">登録ファイル数:</span>{' '}
-                    <span className="font-semibold text-blue-900">{geminiFiles.length}件</span>
+              {/* Store概要 */}
+              <div className="bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 rounded-lg p-4">
+                <h3 className="text-sm font-semibold text-blue-800 mb-3 flex items-center gap-2">
+                  <Database className="h-4 w-4" />
+                  File Search Store 概要
+                </h3>
+                {storeInfo ? (
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+                    <div className="bg-white rounded-lg p-3 shadow-sm">
+                      <p className="text-xs text-gray-500 mb-1">Store名</p>
+                      <p className="font-medium text-gray-900 truncate" title={storeInfo.name}>
+                        {storeInfo.displayName || storeInfo.name}
+                      </p>
+                    </div>
+                    <div className="bg-white rounded-lg p-3 shadow-sm">
+                      <p className="text-xs text-gray-500 mb-1">アクティブ</p>
+                      <p className="font-semibold text-green-600 text-lg">
+                        {storeInfo.activeDocumentsCount || '0'}件
+                      </p>
+                    </div>
+                    <div className="bg-white rounded-lg p-3 shadow-sm">
+                      <p className="text-xs text-gray-500 mb-1">処理中</p>
+                      <p className="font-semibold text-yellow-600 text-lg">
+                        {storeInfo.pendingDocumentsCount || '0'}件
+                      </p>
+                    </div>
+                    <div className="bg-white rounded-lg p-3 shadow-sm">
+                      <p className="text-xs text-gray-500 mb-1">合計サイズ</p>
+                      <p className="font-semibold text-gray-700 text-lg">
+                        {storeInfo.sizeBytes ? formatFileSize(parseInt(storeInfo.sizeBytes, 10)) : '-'}
+                      </p>
+                    </div>
                   </div>
-                  <div>
-                    <span className="text-blue-600">アクティブ:</span>{' '}
-                    <span className="font-semibold text-blue-900">
-                      {geminiFiles.filter(f => f.state === 'ACTIVE').length}件
-                    </span>
+                ) : (
+                  <div className="bg-white rounded-lg p-4 text-center">
+                    <p className="text-gray-500">
+                      File Search Storeはまだ作成されていません。<br />
+                      ナレッジを登録し「同期実行」を押すと、自動的に作成されます。
+                    </p>
                   </div>
-                  <div>
-                    <span className="text-blue-600">処理中:</span>{' '}
-                    <span className="font-semibold text-blue-900">
-                      {geminiFiles.filter(f => f.state === 'PROCESSING').length}件
-                    </span>
-                  </div>
-                </div>
-                <p className="mt-2 text-xs text-blue-600">
-                  ※ Gemini File APIのファイルは48時間後に自動削除されます。定期的な再同期が必要です。
-                </p>
+                )}
               </div>
 
-              {/* ファイル一覧テーブル */}
-              <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
-                <div className="flex items-center justify-between px-6 py-3 bg-gray-50 border-b">
-                  <h3 className="text-sm font-medium text-gray-700">Gemini File API 登録ファイル一覧</h3>
-                  <button
-                    onClick={loadGeminiFiles}
-                    className="text-sm text-gray-600 hover:text-gray-800 flex items-center gap-1"
-                  >
-                    <RefreshCw className="h-4 w-4" />
-                    更新
-                  </button>
+              {/* ドキュメント一覧テーブル */}
+              {storeDocuments.length === 0 ? (
+                <div className="text-center py-12 bg-white rounded-lg border border-gray-200">
+                  <Database className="mx-auto h-12 w-12 text-gray-400" />
+                  <h3 className="mt-4 text-lg font-medium text-gray-900">ドキュメントがありません</h3>
+                  <p className="mt-2 text-sm text-gray-500">
+                    ナレッジを登録し「同期実行」を押すと、File Search Storeにアップロードされます
+                  </p>
                 </div>
-                <table className="min-w-full divide-y divide-gray-200">
-                  <thead className="bg-gray-50">
-                    <tr>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                        ファイル名 / 表示名
-                      </th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                        状態
-                      </th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                        サイズ
-                      </th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                        有効期限
-                      </th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                        紐付けナレッジ
-                      </th>
-                      <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
-                        操作
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody className="bg-white divide-y divide-gray-200">
-                    {geminiFiles.map((file) => (
-                      <tr key={file.name} className="hover:bg-gray-50">
-                        <td className="px-6 py-4">
-                          <div>
-                            <p className="text-sm font-medium text-gray-900 truncate max-w-xs" title={file.displayName}>
-                              {file.displayName}
-                            </p>
-                            <p className="text-xs text-gray-500 font-mono truncate max-w-xs" title={file.name}>
-                              {file.name}
-                            </p>
-                          </div>
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap">
-                          <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
-                            file.state === 'ACTIVE'
-                              ? 'bg-green-100 text-green-800'
-                              : file.state === 'PROCESSING'
-                              ? 'bg-yellow-100 text-yellow-800'
-                              : 'bg-red-100 text-red-800'
-                          }`}>
-                            {file.state === 'ACTIVE' && <CheckCircle className="h-3 w-3 mr-1" />}
-                            {file.state === 'PROCESSING' && <Loader2 className="h-3 w-3 mr-1 animate-spin" />}
-                            {file.state === 'FAILED' && <AlertCircle className="h-3 w-3 mr-1" />}
-                            {file.state}
-                          </span>
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                          {formatFileSize(parseInt(file.sizeBytes || '0', 10))}
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap">
-                          <div className="text-sm text-gray-500">
-                            {file.expirationTime ? new Date(file.expirationTime).toLocaleString('ja-JP') : '-'}
-                          </div>
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap">
-                          {file.linkedDoc ? (
-                            <div className="flex items-center gap-1">
-                              <CheckCircle className="h-4 w-4 text-green-500" />
-                              <span className="text-sm text-gray-900">{file.linkedDoc.title}</span>
-                            </div>
-                          ) : (
-                            <span className="text-sm text-gray-400">-</span>
-                          )}
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-right">
-                          <button
-                            onClick={() => handleDeleteGeminiFile(file.name)}
-                            className="text-red-600 hover:text-red-900"
-                            title="削除"
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </button>
-                        </td>
+              ) : (
+                <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
+                  <div className="flex items-center justify-between px-6 py-3 bg-gray-50 border-b">
+                    <h3 className="text-sm font-medium text-gray-700">
+                      登録ドキュメント一覧 ({storeDocuments.length}件)
+                    </h3>
+                    <button
+                      onClick={loadStoreData}
+                      className="text-sm text-gray-600 hover:text-gray-800 flex items-center gap-1"
+                    >
+                      <RefreshCw className="h-4 w-4" />
+                      更新
+                    </button>
+                  </div>
+                  <table className="min-w-full divide-y divide-gray-200">
+                    <thead className="bg-gray-50">
+                      <tr>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          ドキュメント名
+                        </th>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          状態
+                        </th>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          サイズ
+                        </th>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          更新日時
+                        </th>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          紐付けナレッジ
+                        </th>
+                        <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          操作
+                        </th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+                    </thead>
+                    <tbody className="bg-white divide-y divide-gray-200">
+                      {storeDocuments.map((document) => (
+                        <tr key={document.name} className="hover:bg-gray-50">
+                          <td className="px-6 py-4">
+                            <div>
+                              <p className="text-sm font-medium text-gray-900 truncate max-w-xs" title={document.displayName}>
+                                {document.displayName || '-'}
+                              </p>
+                              <p className="text-xs text-gray-500 font-mono truncate max-w-xs" title={document.name}>
+                                {document.name}
+                              </p>
+                            </div>
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap">
+                            <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                              document.state === 'STATE_ACTIVE'
+                                ? 'bg-green-100 text-green-800'
+                                : document.state === 'STATE_PENDING'
+                                ? 'bg-yellow-100 text-yellow-800'
+                                : 'bg-red-100 text-red-800'
+                            }`}>
+                              {document.state === 'STATE_ACTIVE' && <CheckCircle className="h-3 w-3 mr-1" />}
+                              {document.state === 'STATE_PENDING' && <Loader2 className="h-3 w-3 mr-1 animate-spin" />}
+                              {document.state === 'STATE_FAILED' && <AlertCircle className="h-3 w-3 mr-1" />}
+                              {document.state?.replace('STATE_', '') || '-'}
+                            </span>
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                            {document.sizeBytes ? formatFileSize(parseInt(document.sizeBytes, 10)) : '-'}
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap">
+                            <div className="text-sm text-gray-500">
+                              {document.updateTime ? formatDate(document.updateTime) : '-'}
+                            </div>
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap">
+                            {document.linkedDoc ? (
+                              <div className="flex items-center gap-1">
+                                <CheckCircle className="h-4 w-4 text-green-500" />
+                                <span className="text-sm text-gray-900">{document.linkedDoc.title}</span>
+                              </div>
+                            ) : (
+                              <span className="text-sm text-gray-400">-</span>
+                            )}
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-right">
+                            <button
+                              onClick={() => handleDeleteStoreDocument(document.name)}
+                              className="text-red-600 hover:text-red-900"
+                              title="削除"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
             </div>
           )}
         </div>

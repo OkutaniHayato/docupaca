@@ -1,9 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { adminAuth, adminDb } from '@/config/firebase-admin';
-import { listFiles, getFile, deleteFile } from '@/lib/gemini-file-api';
+import {
+  getFileSearchStore,
+  listDocuments,
+  getDocument,
+  deleteDocument,
+  FileSearchDocument,
+} from '@/lib/gemini-file-search-store';
 
 /**
- * Gemini File API のファイル一覧を取得
+ * File Search Store のドキュメント一覧を取得
  * GET /api/knowledge/files?orgId=xxx
  */
 export async function GET(request: NextRequest) {
@@ -58,69 +64,89 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    // Gemini File APIからファイル一覧を取得
-    const allFiles: Array<{
-      name: string;
-      displayName: string;
-      mimeType: string;
-      sizeBytes: string;
-      createTime: string;
-      expirationTime: string;
-      state: string;
-      uri: string;
-    }> = [];
+    // FileSearchStore情報
+    const fileSearchStoreId = orgData?.fileSearchStoreId;
+    let storeInfo = null;
 
-    let pageToken: string | undefined;
+    if (fileSearchStoreId) {
+      try {
+        storeInfo = await getFileSearchStore(fileSearchStoreId);
+      } catch (error) {
+        console.log('Store取得エラー:', error);
+        // Storeが存在しない場合は無視
+      }
+    }
 
-    do {
-      const result = await listFiles(100, pageToken);
+    // ドキュメント一覧を取得
+    const allDocuments: FileSearchDocument[] = [];
 
-      // この組織に関連するファイルのみフィルタ
-      const orgFiles = result.files.filter(file =>
-        file.displayName?.includes(`[org:${orgId}]`)
-      );
+    if (fileSearchStoreId) {
+      try {
+        let pageToken: string | undefined;
 
-      allFiles.push(...orgFiles.map(file => ({
-        name: file.name,
-        displayName: file.displayName,
-        mimeType: file.mimeType,
-        sizeBytes: file.sizeBytes,
-        createTime: file.createTime,
-        expirationTime: file.expirationTime,
-        state: file.state,
-        uri: file.uri,
-      })));
-
-      pageToken = result.nextPageToken;
-    } while (pageToken);
+        do {
+          const result = await listDocuments(fileSearchStoreId, 100, pageToken);
+          allDocuments.push(...result.documents);
+          pageToken = result.nextPageToken;
+        } while (pageToken);
+      } catch (error) {
+        console.log('ドキュメント一覧取得エラー:', error);
+        // エラーの場合は空配列
+      }
+    }
 
     // Firestoreのナレッジドキュメントと紐付け情報を取得
     const docsSnapshot = await db.collection('orgLearningDocs')
       .where('orgId', '==', orgId)
       .get();
 
-    const docMap = new Map<string, { docId: string; title: string; syncStatus: string }>();
+    const docMap = new Map<string, { docId: string; title: string; syncStatus: string; syncEnabled: boolean }>();
     docsSnapshot.docs.forEach(doc => {
       const data = doc.data();
-      if (data.fileId) {
-        docMap.set(data.fileId, {
+      if (data.documentName || data.fileId) {
+        const key = data.documentName || data.fileId;
+        docMap.set(key, {
           docId: doc.id,
           title: data.title,
           syncStatus: data.syncStatus,
+          syncEnabled: data.syncEnabled !== false, // デフォルトはtrue
         });
       }
     });
 
-    // ファイル情報にFirestoreの情報を追加
-    const filesWithDocInfo = allFiles.map(file => ({
-      ...file,
-      linkedDoc: docMap.get(file.name) || null,
-    }));
+    // ドキュメント情報にFirestoreの情報を追加
+    const documentsWithDocInfo = allDocuments.map(doc => {
+      // カスタムメタデータからdocIdを取得
+      const docIdMeta = doc.customMetadata?.find(m => m.key === 'docId');
+      const linkedDocId = docIdMeta?.stringValue;
+
+      return {
+        name: doc.name,
+        displayName: doc.displayName,
+        mimeType: doc.mimeType,
+        sizeBytes: doc.sizeBytes,
+        createTime: doc.createTime,
+        updateTime: doc.updateTime,
+        state: doc.state,
+        customMetadata: doc.customMetadata,
+        linkedDoc: docMap.get(doc.name) || (linkedDocId ? docMap.get(linkedDocId) : null) || null,
+      };
+    });
 
     return NextResponse.json({
       success: true,
-      files: filesWithDocInfo,
-      totalCount: filesWithDocInfo.length,
+      store: storeInfo ? {
+        name: storeInfo.name,
+        displayName: storeInfo.displayName,
+        activeDocumentsCount: storeInfo.activeDocumentsCount,
+        pendingDocumentsCount: storeInfo.pendingDocumentsCount,
+        failedDocumentsCount: storeInfo.failedDocumentsCount,
+        sizeBytes: storeInfo.sizeBytes,
+        createTime: storeInfo.createTime,
+        updateTime: storeInfo.updateTime,
+      } : null,
+      documents: documentsWithDocInfo,
+      totalCount: documentsWithDocInfo.length,
     });
   } catch (error) {
     console.error('ファイル一覧取得エラー:', error);
@@ -133,8 +159,8 @@ export async function GET(request: NextRequest) {
 }
 
 /**
- * Gemini File API のファイルを削除
- * DELETE /api/knowledge/files?fileName=xxx
+ * File Search Store のドキュメントを削除
+ * DELETE /api/knowledge/files?documentName=xxx
  */
 export async function DELETE(request: NextRequest) {
   try {
@@ -159,32 +185,47 @@ export async function DELETE(request: NextRequest) {
 
     // クエリパラメータ
     const { searchParams } = new URL(request.url);
-    const fileName = searchParams.get('fileName');
+    const documentName = searchParams.get('documentName') || searchParams.get('fileName');
 
-    if (!fileName) {
+    if (!documentName) {
       return NextResponse.json(
-        { success: false, error: 'fileName は必須です' },
+        { success: false, error: 'documentName は必須です' },
         { status: 400 }
       );
     }
 
-    // ファイル情報を取得して確認
-    const fileInfo = await getFile(fileName);
-    console.log(`ファイル削除: ${fileName} (${fileInfo.displayName})`);
+    // ドキュメント情報を取得して確認
+    let docInfo;
+    try {
+      docInfo = await getDocument(documentName);
+      console.log(`ドキュメント削除: ${documentName} (${docInfo.displayName})`);
+    } catch (error) {
+      console.log('ドキュメント情報取得エラー:', error);
+    }
 
-    // ファイルを削除
-    await deleteFile(fileName);
+    // ドキュメントを削除
+    await deleteDocument(documentName, true);
 
-    // Firestoreのドキュメントも更新（fileIdをクリア）
+    // Firestoreのドキュメントも更新（documentName/fileIdをクリア）
     const db = adminDb();
-    const docsSnapshot = await db.collection('orgLearningDocs')
-      .where('fileId', '==', fileName)
+
+    // documentNameで検索
+    let docsSnapshot = await db.collection('orgLearningDocs')
+      .where('documentName', '==', documentName)
       .get();
+
+    // 見つからない場合はfileIdでも検索（互換性）
+    if (docsSnapshot.empty) {
+      docsSnapshot = await db.collection('orgLearningDocs')
+        .where('fileId', '==', documentName)
+        .get();
+    }
 
     if (!docsSnapshot.empty) {
       const batch = db.batch();
       docsSnapshot.docs.forEach(doc => {
         batch.update(doc.ref, {
+          documentName: null,
           fileId: null,
           syncStatus: 'pending',
         });
@@ -194,11 +235,11 @@ export async function DELETE(request: NextRequest) {
 
     return NextResponse.json({
       success: true,
-      message: 'ファイルを削除しました',
+      message: 'ドキュメントを削除しました',
     });
   } catch (error) {
-    console.error('ファイル削除エラー:', error);
-    const errorMessage = error instanceof Error ? error.message : 'ファイル削除に失敗しました';
+    console.error('ドキュメント削除エラー:', error);
+    const errorMessage = error instanceof Error ? error.message : 'ドキュメント削除に失敗しました';
     return NextResponse.json(
       { success: false, error: errorMessage },
       { status: 500 }

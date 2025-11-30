@@ -2,16 +2,22 @@ import { NextRequest, NextResponse } from 'next/server';
 import { adminAuth, adminDb } from '@/config/firebase-admin';
 import { FieldValue, Timestamp } from 'firebase-admin/firestore';
 import {
-  uploadTextContent,
-  deleteFile,
-  waitForFileProcessing,
-} from '@/lib/gemini-file-api';
+  getOrCreateStoreForOrg,
+  uploadTextToStore,
+  waitForUpload,
+  deleteDocument,
+} from '@/lib/gemini-file-search-store';
 
 /**
  * ナレッジ同期APIエンドポイント
  *
- * orgLearningDocsをGemini File APIにアップロードし、
+ * orgLearningDocsをGemini File Search Stores APIにアップロードし、
  * syncStatusとfileIdを更新します。
+ *
+ * File Search Stores API を使用することで:
+ * - 永続的なストレージ（48時間制限なし）
+ * - 自動チャンク化とベクトル化
+ * - セマンティック検索（RAG）が可能
  */
 export async function POST(request: NextRequest) {
   try {
@@ -69,7 +75,21 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // 組織用の FileSearchStore を取得または作成
+    console.log('FileSearchStore を取得/作成中...');
+    const store = await getOrCreateStoreForOrg(orgId, orgData?.name);
+    console.log(`FileSearchStore: ${store.name}`);
+
+    // FileSearchStore IDをorganizationに保存
+    if (!orgData?.fileSearchStoreId || orgData.fileSearchStoreId !== store.name) {
+      await orgDoc.ref.update({
+        fileSearchStoreId: store.name,
+        fileSearchStoreUpdatedAt: FieldValue.serverTimestamp(),
+      });
+    }
+
     // 同期対象のドキュメントを取得
+    // syncEnabled が true のドキュメントのみ（未設定の場合は従来互換で同期する）
     let docsQuery = db.collection('orgLearningDocs')
       .where('orgId', '==', orgId);
 
@@ -96,6 +116,12 @@ export async function POST(request: NextRequest) {
       const docData = docSnapshot.data();
 
       try {
+        // syncEnabled が false の場合はスキップ
+        if (docData.syncEnabled === false) {
+          stats.skippedDocs++;
+          continue;
+        }
+
         // contentが空の場合はスキップ
         if (!docData.content || docData.content.trim().length === 0) {
           stats.skippedDocs++;
@@ -107,34 +133,47 @@ export async function POST(request: NextRequest) {
           syncStatus: 'syncing',
         });
 
-        // 既存のfileIdがある場合は削除を試みる
-        if (docData.fileId) {
+        // 既存のdocumentNameがある場合は削除を試みる
+        if (docData.documentName) {
           try {
-            await deleteFile(docData.fileId);
-            console.log(`既存ファイル削除: ${docData.fileId}`);
+            await deleteDocument(docData.documentName, true);
+            console.log(`既存ドキュメント削除: ${docData.documentName}`);
           } catch (deleteError) {
             // 削除エラーは無視（既に削除済みの可能性）
-            console.log(`既存ファイル削除スキップ: ${docData.fileId}`, deleteError);
+            console.log(`既存ドキュメント削除スキップ: ${docData.documentName}`, deleteError);
           }
         }
 
-        // Gemini File APIにアップロード
-        const displayName = `[org:${orgId}] ${docData.title} (${docId})`;
-        const uploadResult = await uploadTextContent(
+        // File Search Store にアップロード
+        const displayName = `${docData.title || 'Untitled'}`;
+        const metadata = {
+          docId: docId,
+          orgId: orgId,
+          title: docData.title || '',
+          sourceType: docData.sourceType || 'manual',
+        };
+
+        console.log(`アップロード中: ${displayName}`);
+        const uploadResult = await uploadTextToStore(
+          store.name,
           docData.content,
           displayName,
-          docId
+          metadata
         );
 
-        // ファイル処理完了を待機
-        await waitForFileProcessing(uploadResult.name, 30000);
+        // アップロード完了を待機
+        console.log(`アップロード待機中: ${uploadResult.name}`);
+        const completedOp = await waitForUpload(uploadResult.name, 60000);
 
-        console.log(`ファイルアップロード成功: ${uploadResult.name}`);
+        const documentName = completedOp.response?.name;
+        console.log(`アップロード完了: ${documentName}`);
 
         // 成功ステータスに更新
         await docSnapshot.ref.update({
           syncStatus: 'synced',
-          fileId: uploadResult.name,
+          documentName: documentName, // 新しいフィールド（File Search Stores用）
+          fileId: documentName, // 互換性のため
+          fileSearchStoreName: store.name,
           syncedAt: FieldValue.serverTimestamp(),
           syncError: null,
           syncRetryCount: 0,
@@ -168,6 +207,7 @@ export async function POST(request: NextRequest) {
       durationMs,
       syncedDocIds,
       failedDocs,
+      fileSearchStoreName: store.name,
     });
 
     console.log(`ナレッジ同期完了: ${stats.syncedDocs}件成功, ${stats.failedDocs}件失敗, ${durationMs}ms`);
@@ -179,6 +219,7 @@ export async function POST(request: NextRequest) {
         durationMs,
         syncedDocIds,
         failedDocs,
+        fileSearchStoreName: store.name,
       },
     });
   } catch (error) {
