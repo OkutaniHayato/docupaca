@@ -6,6 +6,9 @@
  */
 
 import { GoogleAIFileManager, FileState } from '@google/generative-ai/server';
+import { writeFileSync, unlinkSync } from 'fs';
+import { tmpdir } from 'os';
+import { join } from 'path';
 
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || '';
 
@@ -50,23 +53,26 @@ export async function uploadTextContent(
 ): Promise<GeminiFileInfo> {
   const fileManager = getFileManager();
 
-  // テキストをUint8Arrayに変換
-  const encoder = new TextEncoder();
-  const uint8Array = encoder.encode(content);
+  // 一時ファイルに書き出し
+  const tempFilePath = join(tmpdir(), `knowledge_${docId}_${Date.now()}.txt`);
 
-  // 一時ファイルとしてアップロード（Blobを使用）
-  const blob = new Blob([uint8Array], { type: 'text/plain' });
+  try {
+    writeFileSync(tempFilePath, content, 'utf-8');
 
-  const uploadResult = await fileManager.uploadFile(
-    // @ts-expect-error - Blobもサポートされている
-    blob,
-    {
+    const uploadResult = await fileManager.uploadFile(tempFilePath, {
       mimeType: 'text/plain',
       displayName: `${displayName} (${docId})`,
-    }
-  );
+    });
 
-  return uploadResult.file as GeminiFileInfo;
+    return uploadResult.file as GeminiFileInfo;
+  } finally {
+    // 一時ファイルを削除
+    try {
+      unlinkSync(tempFilePath);
+    } catch {
+      // 削除エラーは無視
+    }
+  }
 }
 
 /**
@@ -84,20 +90,38 @@ export async function uploadFileBuffer(
 ): Promise<GeminiFileInfo> {
   const fileManager = getFileManager();
 
-  // BufferをUint8Arrayに変換してBlobを作成
-  const uint8Array = new Uint8Array(buffer);
-  const blob = new Blob([uint8Array], { type: mimeType });
+  // MIMEタイプから拡張子を決定
+  const extMap: Record<string, string> = {
+    'text/plain': '.txt',
+    'application/pdf': '.pdf',
+    'image/png': '.png',
+    'image/jpeg': '.jpg',
+    'application/vnd.ms-excel': '.xls',
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': '.xlsx',
+    'text/csv': '.csv',
+  };
+  const ext = extMap[mimeType] || '.bin';
 
-  const uploadResult = await fileManager.uploadFile(
-    // @ts-expect-error - Blobもサポートされている
-    blob,
-    {
+  // 一時ファイルに書き出し
+  const tempFilePath = join(tmpdir(), `upload_${Date.now()}${ext}`);
+
+  try {
+    writeFileSync(tempFilePath, buffer);
+
+    const uploadResult = await fileManager.uploadFile(tempFilePath, {
       mimeType,
       displayName,
-    }
-  );
+    });
 
-  return uploadResult.file as GeminiFileInfo;
+    return uploadResult.file as GeminiFileInfo;
+  } finally {
+    // 一時ファイルを削除
+    try {
+      unlinkSync(tempFilePath);
+    } catch {
+      // 削除エラーは無視
+    }
+  }
 }
 
 /**
