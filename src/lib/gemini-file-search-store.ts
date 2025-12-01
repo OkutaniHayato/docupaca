@@ -9,10 +9,6 @@
  * - Document: チャンクのコレクション（ナレッジ1件に対応）
  */
 
-import { writeFileSync, unlinkSync } from 'fs';
-import { tmpdir } from 'os';
-import { join } from 'path';
-
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || '';
 const BASE_URL = 'https://generativelanguage.googleapis.com/v1beta';
 
@@ -257,6 +253,9 @@ export async function deleteDocument(
 /**
  * テキストコンテンツを FileSearchStore にアップロード
  *
+ * Google API の multipart upload 形式に準拠
+ * https://ai.google.dev/gemini-api/docs/file-search
+ *
  * @param storeName Store名
  * @param content テキストコンテンツ
  * @param displayName 表示名
@@ -269,65 +268,64 @@ export async function uploadTextToStore(
   displayName: string,
   metadata?: Record<string, string>
 ): Promise<UploadOperationResponse> {
-  // 一時ファイルに書き出し
-  const tempFilePath = join(tmpdir(), `knowledge_${Date.now()}.txt`);
+  // メタデータオブジェクト
+  const metadataObj: {
+    displayName: string;
+    mimeType: string;
+    customMetadata?: Array<{ key: string; stringValue: string }>;
+  } = {
+    displayName,
+    mimeType: 'text/plain',
+  };
 
-  try {
-    writeFileSync(tempFilePath, content, 'utf-8');
-
-    // multipart/form-data でアップロード
-    const formData = new FormData();
-
-    // メタデータ部分
-    const metadataObj: {
-      displayName: string;
-      customMetadata?: Array<{ key: string; stringValue: string }>;
-    } = {
-      displayName,
-    };
-
-    if (metadata) {
-      metadataObj.customMetadata = Object.entries(metadata).map(
-        ([key, value]) => ({
-          key,
-          stringValue: value,
-        })
-      );
-    }
-
-    formData.append(
-      'metadata',
-      new Blob([JSON.stringify(metadataObj)], { type: 'application/json' })
+  if (metadata) {
+    metadataObj.customMetadata = Object.entries(metadata).map(
+      ([key, value]) => ({
+        key,
+        stringValue: value,
+      })
     );
-
-    // ファイル部分
-    const fileBlob = new Blob([content], { type: 'text/plain' });
-    formData.append('file', fileBlob, 'content.txt');
-
-    const uploadUrl = `https://generativelanguage.googleapis.com/upload/v1beta/${storeName}:uploadToFileSearchStore?key=${GEMINI_API_KEY}`;
-
-    const response = await fetch(uploadUrl, {
-      method: 'POST',
-      body: formData,
-    });
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(`Upload Error (${response.status}): ${errorText}`);
-    }
-
-    return response.json();
-  } finally {
-    try {
-      unlinkSync(tempFilePath);
-    } catch {
-      // 削除エラーは無視
-    }
   }
+
+  // multipart/related 形式でリクエストを構築
+  const boundary = '----WebKitFormBoundary' + Math.random().toString(36).substring(2);
+
+  const bodyParts = [
+    `--${boundary}`,
+    'Content-Type: application/json; charset=UTF-8',
+    '',
+    JSON.stringify(metadataObj),
+    `--${boundary}`,
+    'Content-Type: text/plain',
+    '',
+    content,
+    `--${boundary}--`,
+  ];
+
+  const body = bodyParts.join('\r\n');
+
+  const uploadUrl = `https://generativelanguage.googleapis.com/upload/v1beta/${storeName}:uploadToFileSearchStore?key=${GEMINI_API_KEY}`;
+
+  const response = await fetch(uploadUrl, {
+    method: 'POST',
+    headers: {
+      'Content-Type': `multipart/related; boundary=${boundary}`,
+    },
+    body: body,
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`Upload Error (${response.status}): ${errorText}`);
+  }
+
+  return response.json();
 }
 
 /**
  * ファイルを FileSearchStore にアップロード
+ *
+ * バイナリファイルの場合は base64 エンコードして送信
  *
  * @param storeName Store名
  * @param buffer ファイルのBuffer
@@ -343,9 +341,7 @@ export async function uploadFileToStore(
   displayName: string,
   metadata?: Record<string, string>
 ): Promise<UploadOperationResponse> {
-  const formData = new FormData();
-
-  // メタデータ部分
+  // メタデータオブジェクト
   const metadataObj: {
     displayName: string;
     mimeType: string;
@@ -364,31 +360,35 @@ export async function uploadFileToStore(
     );
   }
 
-  formData.append(
-    'metadata',
-    new Blob([JSON.stringify(metadataObj)], { type: 'application/json' })
-  );
+  // multipart/related 形式でリクエストを構築
+  const boundary = '----WebKitFormBoundary' + Math.random().toString(36).substring(2);
 
-  // ファイル部分
-  const uint8Array = new Uint8Array(buffer);
-  const fileBlob = new Blob([uint8Array], { type: mimeType });
+  // バイナリデータをBase64エンコード
+  const base64Content = buffer.toString('base64');
 
-  // 拡張子を決定
-  const extMap: Record<string, string> = {
-    'text/plain': '.txt',
-    'application/pdf': '.pdf',
-    'image/png': '.png',
-    'image/jpeg': '.jpg',
-  };
-  const ext = extMap[mimeType] || '.bin';
+  const bodyParts = [
+    `--${boundary}`,
+    'Content-Type: application/json; charset=UTF-8',
+    '',
+    JSON.stringify(metadataObj),
+    `--${boundary}`,
+    `Content-Type: ${mimeType}`,
+    'Content-Transfer-Encoding: base64',
+    '',
+    base64Content,
+    `--${boundary}--`,
+  ];
 
-  formData.append('file', fileBlob, `content${ext}`);
+  const body = bodyParts.join('\r\n');
 
   const uploadUrl = `https://generativelanguage.googleapis.com/upload/v1beta/${storeName}:uploadToFileSearchStore?key=${GEMINI_API_KEY}`;
 
   const response = await fetch(uploadUrl, {
     method: 'POST',
-    body: formData,
+    headers: {
+      'Content-Type': `multipart/related; boundary=${boundary}`,
+    },
+    body: body,
   });
 
   if (!response.ok) {
