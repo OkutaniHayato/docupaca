@@ -247,117 +247,45 @@ export async function deleteDocument(
 }
 
 // ============================================
-// アップロード操作
+// インポート操作（File API → FileSearchStore）
 // ============================================
 
 /**
- * テキストコンテンツを FileSearchStore にアップロード
+ * File APIのファイルをFileSearchStoreにインポート
  *
- * シンプルアップロード方式を使用
+ * importFile APIを使用
  * https://ai.google.dev/gemini-api/docs/file-search
  *
- * @param storeName Store名
- * @param content テキストコンテンツ
- * @param displayName 表示名
+ * @param storeName Store名（fileSearchStores/xxx）
+ * @param fileName File API のファイル名（files/xxx）
  * @param metadata カスタムメタデータ
  * @returns Operation レスポンス
  */
-export async function uploadTextToStore(
+export async function importFileToStore(
   storeName: string,
-  content: string,
-  displayName: string,
+  fileName: string,
   metadata?: Record<string, string>
 ): Promise<UploadOperationResponse> {
-  // メタデータをクエリパラメータとして構築
-  const params = new URLSearchParams();
-  params.append('key', GEMINI_API_KEY);
-
-  // displayNameをクエリパラメータに
-  if (displayName) {
-    params.append('displayName', displayName);
-  }
+  // リクエストボディを構築
+  const body: {
+    fileName: string;
+    customMetadata?: Array<{ key: string; stringValue: string }>;
+  } = {
+    fileName,
+  };
 
   // カスタムメタデータがある場合
   if (metadata) {
-    Object.entries(metadata).forEach(([key, value], index) => {
-      params.append(`customMetadata[${index}].key`, key);
-      params.append(`customMetadata[${index}].stringValue`, value);
-    });
+    body.customMetadata = Object.entries(metadata).map(([key, value]) => ({
+      key,
+      stringValue: value,
+    }));
   }
 
-  const uploadUrl = `https://generativelanguage.googleapis.com/upload/v1beta/${storeName}:uploadToFileSearchStore?${params.toString()}`;
-
-  // テキストコンテンツを直接送信
-  const response = await fetch(uploadUrl, {
+  return apiRequest<UploadOperationResponse>(`/${storeName}:importFile`, {
     method: 'POST',
-    headers: {
-      'Content-Type': 'text/plain',
-    },
-    body: content,
+    body: JSON.stringify(body),
   });
-
-  if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(`Upload Error (${response.status}): ${errorText}`);
-  }
-
-  return response.json();
-}
-
-/**
- * ファイルを FileSearchStore にアップロード
- *
- * シンプルアップロード方式を使用
- *
- * @param storeName Store名
- * @param buffer ファイルのBuffer
- * @param mimeType MIMEタイプ
- * @param displayName 表示名
- * @param metadata カスタムメタデータ
- * @returns Operation レスポンス
- */
-export async function uploadFileToStore(
-  storeName: string,
-  buffer: Buffer,
-  mimeType: string,
-  displayName: string,
-  metadata?: Record<string, string>
-): Promise<UploadOperationResponse> {
-  // メタデータをクエリパラメータとして構築
-  const params = new URLSearchParams();
-  params.append('key', GEMINI_API_KEY);
-  params.append('mimeType', mimeType);
-
-  // displayNameをクエリパラメータに
-  if (displayName) {
-    params.append('displayName', displayName);
-  }
-
-  // カスタムメタデータがある場合
-  if (metadata) {
-    Object.entries(metadata).forEach(([key, value], index) => {
-      params.append(`customMetadata[${index}].key`, key);
-      params.append(`customMetadata[${index}].stringValue`, value);
-    });
-  }
-
-  const uploadUrl = `https://generativelanguage.googleapis.com/upload/v1beta/${storeName}:uploadToFileSearchStore?${params.toString()}`;
-
-  // バイナリコンテンツを直接送信
-  const response = await fetch(uploadUrl, {
-    method: 'POST',
-    headers: {
-      'Content-Type': mimeType,
-    },
-    body: buffer,
-  });
-
-  if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(`Upload Error (${response.status}): ${errorText}`);
-  }
-
-  return response.json();
 }
 
 /**

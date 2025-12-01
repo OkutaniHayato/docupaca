@@ -3,10 +3,11 @@ import { adminAuth, adminDb } from '@/config/firebase-admin';
 import { FieldValue, Timestamp } from 'firebase-admin/firestore';
 import {
   getOrCreateStoreForOrg,
-  uploadTextToStore,
+  importFileToStore,
   waitForUpload,
   deleteDocument,
 } from '@/lib/gemini-file-search-store';
+import { uploadTextContent, deleteFile } from '@/lib/gemini-file-api';
 
 /**
  * ナレッジ同期APIエンドポイント
@@ -144,7 +145,7 @@ export async function POST(request: NextRequest) {
           }
         }
 
-        // File Search Store にアップロード
+        // Step 1: File API にアップロード
         const displayName = `${docData.title || 'Untitled'}`;
         const metadata = {
           docId: docId,
@@ -153,17 +154,34 @@ export async function POST(request: NextRequest) {
           sourceType: docData.sourceType || 'manual',
         };
 
-        console.log(`アップロード中: ${displayName}`);
-        const uploadResult = await uploadTextToStore(
-          store.name,
+        console.log(`File APIにアップロード中: ${displayName}`);
+        const fileApiResult = await uploadTextContent(
           docData.content,
           displayName,
+          docId
+        );
+        console.log(`File APIアップロード完了: ${fileApiResult.name}`);
+
+        // Step 2: File Search Store にインポート
+        console.log(`FileSearchStoreにインポート中: ${fileApiResult.name} → ${store.name}`);
+        const importResult = await importFileToStore(
+          store.name,
+          fileApiResult.name,
           metadata
         );
 
-        // アップロード完了を待機
-        console.log(`アップロード待機中: ${uploadResult.name}`);
-        const completedOp = await waitForUpload(uploadResult.name, 60000);
+        // インポート完了を待機
+        console.log(`インポート待機中: ${importResult.name}`);
+        const completedOp = await waitForUpload(importResult.name, 60000);
+
+        // Step 3: File API の一時ファイルを削除（オプション：48時間後に自動削除されるが、すぐ削除してもOK）
+        try {
+          await deleteFile(fileApiResult.name);
+          console.log(`File API一時ファイル削除: ${fileApiResult.name}`);
+        } catch (deleteError) {
+          // 削除エラーは無視（ファイルは48時間後に自動削除される）
+          console.log(`File API一時ファイル削除スキップ: ${fileApiResult.name}`, deleteError);
+        }
 
         const documentName = completedOp.response?.name;
         console.log(`アップロード完了: ${documentName}`);
