@@ -253,7 +253,7 @@ export async function deleteDocument(
 /**
  * テキストコンテンツを FileSearchStore にアップロード
  *
- * Google API の multipart upload 形式に準拠
+ * シンプルアップロード方式を使用
  * https://ai.google.dev/gemini-api/docs/file-search
  *
  * @param storeName Store名
@@ -268,50 +268,32 @@ export async function uploadTextToStore(
   displayName: string,
   metadata?: Record<string, string>
 ): Promise<UploadOperationResponse> {
-  // メタデータオブジェクト
-  const metadataObj: {
-    displayName: string;
-    mimeType: string;
-    customMetadata?: Array<{ key: string; stringValue: string }>;
-  } = {
-    displayName,
-    mimeType: 'text/plain',
-  };
+  // メタデータをクエリパラメータとして構築
+  const params = new URLSearchParams();
+  params.append('key', GEMINI_API_KEY);
 
-  if (metadata) {
-    metadataObj.customMetadata = Object.entries(metadata).map(
-      ([key, value]) => ({
-        key,
-        stringValue: value,
-      })
-    );
+  // displayNameをクエリパラメータに
+  if (displayName) {
+    params.append('displayName', displayName);
   }
 
-  // multipart/related 形式でリクエストを構築
-  const boundary = '----WebKitFormBoundary' + Math.random().toString(36).substring(2);
+  // カスタムメタデータがある場合
+  if (metadata) {
+    Object.entries(metadata).forEach(([key, value], index) => {
+      params.append(`customMetadata[${index}].key`, key);
+      params.append(`customMetadata[${index}].stringValue`, value);
+    });
+  }
 
-  const bodyParts = [
-    `--${boundary}`,
-    'Content-Type: application/json; charset=UTF-8',
-    '',
-    JSON.stringify(metadataObj),
-    `--${boundary}`,
-    'Content-Type: text/plain',
-    '',
-    content,
-    `--${boundary}--`,
-  ];
+  const uploadUrl = `https://generativelanguage.googleapis.com/upload/v1beta/${storeName}:uploadToFileSearchStore?${params.toString()}`;
 
-  const body = bodyParts.join('\r\n');
-
-  const uploadUrl = `https://generativelanguage.googleapis.com/upload/v1beta/${storeName}:uploadToFileSearchStore?key=${GEMINI_API_KEY}`;
-
+  // テキストコンテンツを直接送信
   const response = await fetch(uploadUrl, {
     method: 'POST',
     headers: {
-      'Content-Type': `multipart/related; boundary=${boundary}`,
+      'Content-Type': 'text/plain',
     },
-    body: body,
+    body: content,
   });
 
   if (!response.ok) {
@@ -325,7 +307,7 @@ export async function uploadTextToStore(
 /**
  * ファイルを FileSearchStore にアップロード
  *
- * バイナリファイルの場合は base64 エンコードして送信
+ * シンプルアップロード方式を使用
  *
  * @param storeName Store名
  * @param buffer ファイルのBuffer
@@ -341,54 +323,33 @@ export async function uploadFileToStore(
   displayName: string,
   metadata?: Record<string, string>
 ): Promise<UploadOperationResponse> {
-  // メタデータオブジェクト
-  const metadataObj: {
-    displayName: string;
-    mimeType: string;
-    customMetadata?: Array<{ key: string; stringValue: string }>;
-  } = {
-    displayName,
-    mimeType,
-  };
+  // メタデータをクエリパラメータとして構築
+  const params = new URLSearchParams();
+  params.append('key', GEMINI_API_KEY);
+  params.append('mimeType', mimeType);
 
-  if (metadata) {
-    metadataObj.customMetadata = Object.entries(metadata).map(
-      ([key, value]) => ({
-        key,
-        stringValue: value,
-      })
-    );
+  // displayNameをクエリパラメータに
+  if (displayName) {
+    params.append('displayName', displayName);
   }
 
-  // multipart/related 形式でリクエストを構築
-  const boundary = '----WebKitFormBoundary' + Math.random().toString(36).substring(2);
+  // カスタムメタデータがある場合
+  if (metadata) {
+    Object.entries(metadata).forEach(([key, value], index) => {
+      params.append(`customMetadata[${index}].key`, key);
+      params.append(`customMetadata[${index}].stringValue`, value);
+    });
+  }
 
-  // バイナリデータをBase64エンコード
-  const base64Content = buffer.toString('base64');
+  const uploadUrl = `https://generativelanguage.googleapis.com/upload/v1beta/${storeName}:uploadToFileSearchStore?${params.toString()}`;
 
-  const bodyParts = [
-    `--${boundary}`,
-    'Content-Type: application/json; charset=UTF-8',
-    '',
-    JSON.stringify(metadataObj),
-    `--${boundary}`,
-    `Content-Type: ${mimeType}`,
-    'Content-Transfer-Encoding: base64',
-    '',
-    base64Content,
-    `--${boundary}--`,
-  ];
-
-  const body = bodyParts.join('\r\n');
-
-  const uploadUrl = `https://generativelanguage.googleapis.com/upload/v1beta/${storeName}:uploadToFileSearchStore?key=${GEMINI_API_KEY}`;
-
+  // バイナリコンテンツを直接送信
   const response = await fetch(uploadUrl, {
     method: 'POST',
     headers: {
-      'Content-Type': `multipart/related; boundary=${boundary}`,
+      'Content-Type': mimeType,
     },
-    body: body,
+    body: buffer,
   });
 
   if (!response.ok) {
