@@ -186,14 +186,16 @@ export async function POST(request: NextRequest) {
           console.log(`File API一時ファイル削除スキップ: ${fileApiResult.name}`, deleteError);
         }
 
-        // importFile の場合、response内にドキュメント情報がある
-        // response: { "@type": "...", "name": "fileSearchStores/xxx/documents/yyy", ... }
-        const documentName = completedOp.response?.name ||
-                            (completedOp as unknown as { result?: { name?: string } }).result?.name;
+        // importFile の場合、responseにdocumentNameがある
+        // response: { "@type": "...", "parent": "xxx", "documentName": "yyy" }
+        // フルパスは fileSearchStores/{parent}/documents/{documentName}
+        const responseData = completedOp.response as { parent?: string; documentName?: string; name?: string } | undefined;
+        let documentName = responseData?.name; // 旧形式対応
 
-        if (!documentName) {
-          console.warn('ドキュメント名が取得できませんでした。Operation:', completedOp);
+        if (!documentName && responseData?.parent && responseData?.documentName) {
+          documentName = `fileSearchStores/${responseData.parent}/documents/${responseData.documentName}`;
         }
+
         console.log(`アップロード完了: ${documentName}`);
 
         // 成功ステータスに更新
