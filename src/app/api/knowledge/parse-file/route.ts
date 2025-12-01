@@ -11,7 +11,9 @@ const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
 async function parsePdf(buffer: Buffer): Promise<string> {
   try {
     // 動的インポートでpdf-parseを読み込み
-    const pdfParse = (await import('pdf-parse')).default;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const pdfParseModule = await import('pdf-parse') as any;
+    const pdfParse = pdfParseModule.default || pdfParseModule;
     const data = await pdfParse(buffer);
     return data.text.trim();
   } catch (error) {
