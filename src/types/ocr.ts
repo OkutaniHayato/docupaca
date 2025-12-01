@@ -17,11 +17,157 @@ export interface Organization {
   /** 所有者UID */
   owner_id: string;
 
+  /** Gemini File Search ストアID（例: org_<orgId>_rules） */
+  fileSearchStoreId?: string;
+
   /** 作成日時 */
   created_at: FirebaseFirestore.Timestamp | Date;
 
   /** 更新日時 */
   updated_at?: FirebaseFirestore.Timestamp | Date;
+}
+
+/**
+ * 組織学習ドキュメントのタイプ
+ */
+export type OrgLearningDocType =
+  | 'rule'           // 業務ルール（勘定科目割当ルールなど）
+  | 'customer_master' // 顧客マスタ
+  | 'item_master'     // 品目マスタ
+  | 'account_master'  // 勘定科目マスタ
+  | 'tax_master'      // 税区分マスタ
+  | 'department_master' // 部門マスタ
+  | 'exception'       // 例外ルール
+  | 'other';          // その他
+
+/**
+ * 組織学習ドキュメント（orgLearningDocs コレクション）
+ * Gemini File Searchに同期するナレッジデータ
+ */
+export interface OrgLearningDoc {
+  /** 組織ID（organizationsのドキュメントID） */
+  orgId: string;
+
+  /** ドキュメントタイプ */
+  type: OrgLearningDocType;
+
+  /** タイトル */
+  title: string;
+
+  /** コンテンツ（マークダウン形式推奨） */
+  content: string;
+
+  /** 作成日時 */
+  createdAt: FirebaseFirestore.Timestamp | Date;
+
+  /** 更新日時 */
+  updatedAt: FirebaseFirestore.Timestamp | Date;
+
+  /** 作成者UID */
+  createdBy: string;
+
+  /** 更新者UID */
+  updatedBy?: string;
+
+  // === ソースファイル関連 ===
+
+  /** ソースタイプ: テキスト入力 or ファイルアップロード */
+  sourceType?: 'text' | 'file';
+
+  /** アップロードファイルのStorage URL */
+  sourceFileUrl?: string;
+
+  /** アップロードファイルの元ファイル名 */
+  sourceFileName?: string;
+
+  /** アップロードファイルのMIMEタイプ */
+  sourceFileMimeType?: string;
+
+  /** アップロードファイルのサイズ（バイト） */
+  sourceFileSize?: number;
+
+  // === File Search 同期関連 ===
+
+  /** Gemini File Search でのファイルID（同期後に設定） */
+  fileId?: string;
+
+  /** 最終同期日時 */
+  syncedAt?: FirebaseFirestore.Timestamp | Date;
+
+  /** 同期ステータス */
+  syncStatus?: 'pending' | 'syncing' | 'synced' | 'failed';
+
+  /** 同期エラーメッセージ */
+  syncError?: string;
+
+  /** 同期リトライ回数 */
+  syncRetryCount?: number;
+}
+
+/**
+ * 同期履歴（org_learning_sync_history コレクション）
+ * File Search同期の実行履歴を記録
+ */
+export interface OrgLearningSyncHistory {
+  /** 組織ID */
+  orgId: string;
+
+  /** 実行日時 */
+  executedAt: FirebaseFirestore.Timestamp | Date;
+
+  /** 実行タイプ */
+  executionType: 'manual' | 'scheduled' | 'on_update';
+
+  /** 処理統計 */
+  stats: {
+    totalDocs: number;
+    syncedDocs: number;
+    failedDocs: number;
+    skippedDocs: number;
+  };
+
+  /** 処理時間（ミリ秒） */
+  durationMs: number;
+
+  /** 同期されたドキュメントの詳細 */
+  syncedDocIds: string[];
+
+  /** 失敗したドキュメントとエラー */
+  failedDocs: Array<{
+    docId: string;
+    error: string;
+  }>;
+
+  /** エラーメッセージ（全体的なエラーの場合） */
+  error?: string;
+}
+
+/**
+ * コード提案の結果
+ */
+export interface CodeSuggestion {
+  code: string;
+  confidence: number;
+  reason: string;
+}
+
+/**
+ * 行ごとのコード提案
+ */
+export interface LineCodeSuggestion {
+  index: number;
+  itemCode: CodeSuggestion;
+  accountCode: CodeSuggestion;
+  taxCategory: CodeSuggestion;
+  departmentCode: CodeSuggestion;
+}
+
+/**
+ * ドキュメントに対するコード提案全体
+ */
+export interface DocumentCodeSuggestions {
+  customerCode: CodeSuggestion;
+  lines: LineCodeSuggestion[];
 }
 
 /**

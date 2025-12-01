@@ -1874,3 +1874,18 @@ ${jsonSchemaExample}
     }
   }
 );
+
+// =====================================================
+// File Search 同期関連のエクスポート
+// =====================================================
+export {
+  syncOrgLearningDocsHttp,
+  suggestCodesHttp,
+  onOrgLearningDocWrite,
+  scheduledSyncOrgLearningDocs,
+} from './file-search-sync';
+
+// =====================================================
+// ナレッジファイル解析関連のエクスポート
+// =====================================================
+export { parseKnowledgeFileHttp } from './knowledge-file-parser';

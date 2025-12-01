@@ -19,7 +19,8 @@ import {
   Folder,
   FileText,
   ChevronDown,
-  ChevronRight
+  ChevronRight,
+  BookOpen
 } from 'lucide-react';
 
 interface OrganizationWithId extends Organization {
@@ -172,6 +173,19 @@ export default function SidebarNav() {
         >
           <Building2 className="mr-3 h-5 w-5" />
           組織マスタ
+        </Link>
+
+        {/* ナレッジ管理 */}
+        <Link
+          href="/dashboard/knowledge"
+          className={`flex items-center rounded px-4 py-2.5 transition duration-200 ${
+            pathname === '/dashboard/knowledge'
+              ? 'bg-green-700 text-white'
+              : 'text-white hover:bg-green-700'
+          }`}
+        >
+          <BookOpen className="mr-3 h-5 w-5" />
+          ナレッジ管理
         </Link>
 
         {/* OCR設定セクション */}

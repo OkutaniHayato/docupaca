@@ -1,0 +1,391 @@
+/**
+ * Gemini File Search Stores API ユーティリティ
+ *
+ * RAG機能を提供するFile Search Stores APIのクライアント
+ * https://ai.google.dev/gemini-api/docs/file-search
+ *
+ * 構造:
+ * - FileSearchStore: ドキュメントのコレクション（組織ごとに1つ）
+ * - Document: チャンクのコレクション（ナレッジ1件に対応）
+ */
+
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY || '';
+const BASE_URL = 'https://generativelanguage.googleapis.com/v1beta';
+
+/**
+ * FileSearchStore の情報
+ */
+export interface FileSearchStore {
+  name: string; // fileSearchStores/xxx
+  displayName?: string;
+  createTime?: string;
+  updateTime?: string;
+  activeDocumentsCount?: string;
+  pendingDocumentsCount?: string;
+  failedDocumentsCount?: string;
+  sizeBytes?: string;
+}
+
+/**
+ * Document の状態
+ */
+export type DocumentState =
+  | 'STATE_UNSPECIFIED'
+  | 'STATE_PENDING'
+  | 'STATE_ACTIVE'
+  | 'STATE_FAILED';
+
+/**
+ * Document の情報
+ */
+export interface FileSearchDocument {
+  name: string; // fileSearchStores/xxx/documents/yyy
+  displayName?: string;
+  customMetadata?: Array<{
+    key: string;
+    stringValue?: string;
+    numericValue?: number;
+  }>;
+  createTime?: string;
+  updateTime?: string;
+  state?: DocumentState;
+  sizeBytes?: string;
+  mimeType?: string;
+}
+
+/**
+ * API リクエストのヘルパー
+ */
+async function apiRequest<T>(
+  endpoint: string,
+  options: RequestInit = {}
+): Promise<T> {
+  if (!GEMINI_API_KEY) {
+    throw new Error('GEMINI_API_KEY が設定されていません');
+  }
+
+  const url = `${BASE_URL}${endpoint}${endpoint.includes('?') ? '&' : '?'}key=${GEMINI_API_KEY}`;
+
+  const response = await fetch(url, {
+    ...options,
+    headers: {
+      'Content-Type': 'application/json',
+      ...options.headers,
+    },
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`API Error (${response.status}): ${errorText}`);
+  }
+
+  // DELETE の場合は空レスポンス
+  if (response.status === 204 || options.method === 'DELETE') {
+    return {} as T;
+  }
+
+  return response.json();
+}
+
+// ============================================
+// FileSearchStore 操作
+// ============================================
+
+/**
+ * FileSearchStore を作成
+ *
+ * @param displayName 表示名
+ * @returns 作成された FileSearchStore
+ */
+export async function createFileSearchStore(
+  displayName: string
+): Promise<FileSearchStore> {
+  return apiRequest<FileSearchStore>('/fileSearchStores', {
+    method: 'POST',
+    body: JSON.stringify({ displayName }),
+  });
+}
+
+/**
+ * FileSearchStore を取得
+ *
+ * @param storeName Store名（fileSearchStores/xxx）
+ * @returns FileSearchStore 情報
+ */
+export async function getFileSearchStore(
+  storeName: string
+): Promise<FileSearchStore> {
+  return apiRequest<FileSearchStore>(`/${storeName}`);
+}
+
+/**
+ * FileSearchStore 一覧を取得
+ *
+ * @param pageSize ページサイズ
+ * @param pageToken ページトークン
+ * @returns Store一覧
+ */
+export async function listFileSearchStores(
+  pageSize: number = 20,
+  pageToken?: string
+): Promise<{ fileSearchStores: FileSearchStore[]; nextPageToken?: string }> {
+  const params = new URLSearchParams({ pageSize: String(pageSize) });
+  if (pageToken) params.append('pageToken', pageToken);
+
+  return apiRequest<{
+    fileSearchStores: FileSearchStore[];
+    nextPageToken?: string;
+  }>(`/fileSearchStores?${params.toString()}`);
+}
+
+/**
+ * FileSearchStore を削除
+ *
+ * @param storeName Store名
+ * @param force ドキュメントも一緒に削除するか
+ */
+export async function deleteFileSearchStore(
+  storeName: string,
+  force: boolean = false
+): Promise<void> {
+  await apiRequest(`/${storeName}?force=${force}`, {
+    method: 'DELETE',
+  });
+}
+
+/**
+ * 組織用の FileSearchStore を取得または作成
+ *
+ * @param orgId 組織ID
+ * @param orgName 組織名（新規作成時に使用）
+ * @returns FileSearchStore
+ */
+export async function getOrCreateStoreForOrg(
+  orgId: string,
+  orgName?: string
+): Promise<FileSearchStore> {
+  // 既存のStoreを検索（ページネーション対応）
+  let pageToken: string | undefined;
+
+  do {
+    const { fileSearchStores, nextPageToken } = await listFileSearchStores(20, pageToken);
+
+    const existingStore = fileSearchStores?.find(
+      (store) =>
+        store.displayName?.includes(`[org:${orgId}]`) ||
+        store.name?.includes(orgId)
+    );
+
+    if (existingStore) {
+      return existingStore;
+    }
+
+    pageToken = nextPageToken;
+  } while (pageToken);
+
+  // 新規作成
+  const displayName = `[org:${orgId}] ${orgName || 'Knowledge Store'}`;
+  return createFileSearchStore(displayName);
+}
+
+// ============================================
+// Document 操作
+// ============================================
+
+/**
+ * Document 一覧を取得
+ *
+ * @param storeName Store名
+ * @param pageSize ページサイズ
+ * @param pageToken ページトークン
+ * @returns Document一覧
+ */
+export async function listDocuments(
+  storeName: string,
+  pageSize: number = 20,
+  pageToken?: string
+): Promise<{ documents: FileSearchDocument[]; nextPageToken?: string }> {
+  const params = new URLSearchParams({ pageSize: String(pageSize) });
+  if (pageToken) params.append('pageToken', pageToken);
+
+  const result = await apiRequest<{
+    documents?: FileSearchDocument[];
+    nextPageToken?: string;
+  }>(`/${storeName}/documents?${params.toString()}`);
+
+  return {
+    documents: result.documents || [],
+    nextPageToken: result.nextPageToken,
+  };
+}
+
+/**
+ * Document を取得
+ *
+ * @param documentName Document名
+ * @returns Document情報
+ */
+export async function getDocument(
+  documentName: string
+): Promise<FileSearchDocument> {
+  return apiRequest<FileSearchDocument>(`/${documentName}`);
+}
+
+/**
+ * Document を削除
+ *
+ * @param documentName Document名
+ * @param force チャンクも削除するか
+ */
+export async function deleteDocument(
+  documentName: string,
+  force: boolean = true
+): Promise<void> {
+  await apiRequest(`/${documentName}?force=${force}`, {
+    method: 'DELETE',
+  });
+}
+
+// ============================================
+// インポート操作（File API → FileSearchStore）
+// ============================================
+
+/**
+ * File APIのファイルをFileSearchStoreにインポート
+ *
+ * importFile APIを使用
+ * https://ai.google.dev/gemini-api/docs/file-search
+ *
+ * @param storeName Store名（fileSearchStores/xxx）
+ * @param fileName File API のファイル名（files/xxx）
+ * @param metadata カスタムメタデータ
+ * @returns Operation レスポンス
+ */
+export async function importFileToStore(
+  storeName: string,
+  fileName: string,
+  metadata?: Record<string, string>
+): Promise<UploadOperationResponse> {
+  // リクエストボディを構築
+  const body: {
+    fileName: string;
+    customMetadata?: Array<{ key: string; stringValue: string }>;
+  } = {
+    fileName,
+  };
+
+  // カスタムメタデータがある場合
+  if (metadata) {
+    body.customMetadata = Object.entries(metadata).map(([key, value]) => ({
+      key,
+      stringValue: value,
+    }));
+  }
+
+  return apiRequest<UploadOperationResponse>(`/${storeName}:importFile`, {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
+/**
+ * アップロード Operation のレスポンス
+ */
+export interface UploadOperationResponse {
+  name: string; // operations/xxx
+  metadata?: Record<string, unknown>;
+  done: boolean;
+  error?: {
+    code: number;
+    message: string;
+  };
+  response?: {
+    '@type': string;
+    name: string; // fileSearchStores/xxx/documents/yyy
+    displayName?: string;
+  };
+}
+
+/**
+ * Operation の状態を取得
+ *
+ * @param operationName Operation名（フルパス）
+ * @returns Operation レスポンス
+ */
+export async function getOperation(
+  operationName: string
+): Promise<UploadOperationResponse> {
+  // operationName は fileSearchStores/xxx/upload/operations/yyy の形式
+  return apiRequest<UploadOperationResponse>(`/${operationName}`);
+}
+
+/**
+ * アップロード完了を待機
+ *
+ * @param operationName Operation名
+ * @param maxWaitMs 最大待機時間
+ * @returns 完了した Operation
+ */
+export async function waitForUpload(
+  operationName: string,
+  maxWaitMs: number = 60000
+): Promise<UploadOperationResponse> {
+  const startTime = Date.now();
+
+  while (Date.now() - startTime < maxWaitMs) {
+    const operation = await getOperation(operationName);
+
+    if (operation.done) {
+      if (operation.error) {
+        throw new Error(
+          `Upload failed: ${operation.error.message} (code: ${operation.error.code})`
+        );
+      }
+      return operation;
+    }
+
+    // 2秒待機
+    await new Promise((resolve) => setTimeout(resolve, 2000));
+  }
+
+  throw new Error(`Upload timed out: ${operationName}`);
+}
+
+// ============================================
+// ヘルパー関数
+// ============================================
+
+/**
+ * Store名からStore IDを抽出
+ */
+export function extractStoreId(storeName: string): string {
+  return storeName.replace('fileSearchStores/', '');
+}
+
+/**
+ * Document名からDocument IDを抽出
+ */
+export function extractDocumentId(documentName: string): string {
+  const parts = documentName.split('/');
+  return parts[parts.length - 1];
+}
+
+/**
+ * カスタムメタデータからdocIdを取得
+ */
+export function getDocIdFromMetadata(
+  doc: FileSearchDocument
+): string | undefined {
+  const meta = doc.customMetadata?.find((m) => m.key === 'docId');
+  return meta?.stringValue;
+}
+
+/**
+ * カスタムメタデータからorgIdを取得
+ */
+export function getOrgIdFromMetadata(
+  doc: FileSearchDocument
+): string | undefined {
+  const meta = doc.customMetadata?.find((m) => m.key === 'orgId');
+  return meta?.stringValue;
+}
