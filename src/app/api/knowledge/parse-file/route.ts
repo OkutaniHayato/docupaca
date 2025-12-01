@@ -11,10 +11,9 @@ const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
 async function parsePdf(buffer: Buffer): Promise<string> {
   try {
     // 動的インポートでpdf-parseを読み込み
-    const { PDFParse } = await import('pdf-parse');
-    const pdfParser = new PDFParse({ data: new Uint8Array(buffer) });
-    const textResult = await pdfParser.getText();
-    return textResult.text.trim();
+    const pdfParse = (await import('pdf-parse')).default;
+    const data = await pdfParse(buffer);
+    return data.text.trim();
   } catch (error) {
     console.error('PDF解析エラー:', error);
     throw new Error('PDFファイルの解析に失敗しました');
