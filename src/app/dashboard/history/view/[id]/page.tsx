@@ -288,7 +288,6 @@ export default function HistoryDetailPage() {
   const [isCodeSuggesting, setIsCodeSuggesting] = useState(false);
   const [codeSuggestionError, setCodeSuggestionError] = useState<string | null>(null);
   const [showCodeSuggestionModal, setShowCodeSuggestionModal] = useState(false);
-  const [useRag, setUseRag] = useState(true);
 
   const historyId = params.id as string;
 
@@ -441,7 +440,7 @@ export default function HistoryDetailPage() {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${token}`,
         },
-        body: JSON.stringify({ useRag }),
+        body: JSON.stringify({ useRag: true }),
       });
 
       if (!response.ok) {
@@ -924,8 +923,8 @@ export default function HistoryDetailPage() {
         {/* --- ボタン群 --- */}
         {history && Object.keys(history.extracted_data).length > 0 && (
           <div className="flex space-x-2">
-            {/* AIコード提案ボタン */}
-            {history.ragCodeSuggestionEnabled !== false && (
+            {/* コード再提案ボタン（既に提案がある場合のみ表示） */}
+            {history.codeSuggestions && (
               <button
                 onClick={() => setShowCodeSuggestionModal(true)}
                 disabled={isCodeSuggesting}
@@ -936,7 +935,7 @@ export default function HistoryDetailPage() {
                 ) : (
                   <Sparkles className="w-4 h-4" />
                 )}
-                {isCodeSuggesting ? '提案中...' : 'AIコード提案'}
+                {isCodeSuggesting ? '提案中...' : 'コード再提案'}
               </button>
             )}
             {/* CSVダウンロードボタン */}
@@ -956,42 +955,24 @@ export default function HistoryDetailPage() {
         )}
       </div>
 
-      {/* AIコード提案モーダル */}
+      {/* コード再提案モーダル */}
       {showCodeSuggestionModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <div className="bg-white rounded-lg p-6 max-w-md w-full mx-4 shadow-xl">
             <div className="flex items-center gap-2 mb-4">
               <Sparkles className="w-6 h-6 text-purple-600" />
-              <h3 className="text-lg font-semibold text-gray-900">AIコード提案</h3>
+              <h3 className="text-lg font-semibold text-gray-900">コード再提案</h3>
             </div>
 
             <p className="text-sm text-gray-600 mb-4">
-              帳票データから顧客コード、品目コード、勘定科目などを提案します。
+              ナレッジを参照して、顧客コード、品目コード、勘定科目などを再提案します。
             </p>
-
-            {/* RAG使用オプション */}
-            <div className="bg-gray-50 rounded-lg p-4 mb-4">
-              <label className="flex items-start gap-3 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={useRag}
-                  onChange={(e) => setUseRag(e.target.checked)}
-                  className="mt-1 w-4 h-4 text-purple-600 rounded focus:ring-purple-500"
-                />
-                <div>
-                  <span className="font-medium text-gray-900">ナレッジを使用する (RAG)</span>
-                  <p className="text-xs text-gray-500 mt-1">
-                    組織に登録されたマスタデータやルールを参照して、より正確なコード提案を行います。
-                  </p>
-                </div>
-              </label>
-            </div>
 
             {/* 注意事項 */}
             <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3 mb-4 flex items-start gap-2">
               <AlertTriangle className="w-5 h-5 text-yellow-600 flex-shrink-0 mt-0.5" />
               <p className="text-sm text-yellow-800">
-                提案内容は参考情報です。必ず内容を確認してからご使用ください。
+                現在の提案内容は上書きされます。提案内容は参考情報ですので、必ず内容を確認してください。
               </p>
             </div>
 
@@ -1008,7 +989,7 @@ export default function HistoryDetailPage() {
                 className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 font-medium inline-flex items-center gap-2"
               >
                 <Sparkles className="w-4 h-4" />
-                提案を実行
+                再提案を実行
               </button>
             </div>
           </div>

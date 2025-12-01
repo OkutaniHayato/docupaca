@@ -288,6 +288,11 @@ export interface OcrSetting {
 
   /** 学習データ（訂正ログから自動生成） */
   learning?: LearningData;
+
+  // === RAGコード提案（機能④） ===
+
+  /** RAGによるコード提案を有効にするか（デフォルト: false） */
+  enableRagCodeSuggestion?: boolean;
 }
 
 /**

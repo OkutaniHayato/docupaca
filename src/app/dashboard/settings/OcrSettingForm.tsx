@@ -49,6 +49,8 @@ export interface OcrSettingFormData {
   displayName?: string;
   templateType?: string;
   exampleKeywords?: string[];
+  // RAGコード提案（機能④）
+  enableRagCodeSuggestion?: boolean;
 }
 
 // 後方互換性のため、ExtractionFieldを再エクスポート
@@ -172,6 +174,7 @@ export default function OcrSettingForm({
       prompt_text: '',
       extraction_fields: [],
       organization_id: '',
+      enableRagCodeSuggestion: false,
     }
   );
 
@@ -553,6 +556,36 @@ export default function OcrSettingForm({
             <option value="gemini-2.5-flash">Gemini 2.5 Flash (高性能)</option>
             <option value="gemini-2.5-pro">Gemini 2.5 Pro (最高性能)</option>
           </select>
+        </div>
+
+        {/* RAGコード提案機能トグル */}
+        <div className="mt-4">
+          <div className="flex items-center justify-between p-4 bg-purple-50 rounded-lg border border-purple-200">
+            <div className="flex items-center gap-3">
+              <Sparkles className="h-5 w-5 text-purple-600" />
+              <div>
+                <span className="block text-sm font-medium text-gray-900">
+                  RAGによるコード提案
+                </span>
+                <span className="text-xs text-gray-500">
+                  OCR実行時に顧客コード・品目コード・勘定科目などを自動提案
+                </span>
+              </div>
+            </div>
+            <label className="relative inline-flex items-center cursor-pointer">
+              <input
+                type="checkbox"
+                checked={formData.enableRagCodeSuggestion || false}
+                onChange={(e) => setFormData(prev => ({ ...prev, enableRagCodeSuggestion: e.target.checked }))}
+                className="sr-only peer"
+                disabled={isLoading}
+              />
+              <div className="w-11 h-6 bg-gray-300 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-purple-500 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-purple-600"></div>
+            </label>
+          </div>
+          <p className="mt-1 text-xs text-gray-500">
+            有効にすると、OCR実行完了時にナレッジを参照してコード提案を自動実行します
+          </p>
         </div>
       </div>
 
