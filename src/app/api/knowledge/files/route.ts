@@ -85,7 +85,7 @@ export async function GET(request: NextRequest) {
         let pageToken: string | undefined;
 
         do {
-          const result = await listDocuments(fileSearchStoreId, 100, pageToken);
+          const result = await listDocuments(fileSearchStoreId, 20, pageToken);
           allDocuments.push(...result.documents);
           pageToken = result.nextPageToken;
         } while (pageToken);

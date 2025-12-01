@@ -168,18 +168,24 @@ export async function getOrCreateStoreForOrg(
   orgId: string,
   orgName?: string
 ): Promise<FileSearchStore> {
-  // 既存のStoreを検索
-  const { fileSearchStores } = await listFileSearchStores(100);
+  // 既存のStoreを検索（ページネーション対応）
+  let pageToken: string | undefined;
 
-  const existingStore = fileSearchStores?.find(
-    (store) =>
-      store.displayName?.includes(`[org:${orgId}]`) ||
-      store.name?.includes(orgId)
-  );
+  do {
+    const { fileSearchStores, nextPageToken } = await listFileSearchStores(20, pageToken);
 
-  if (existingStore) {
-    return existingStore;
-  }
+    const existingStore = fileSearchStores?.find(
+      (store) =>
+        store.displayName?.includes(`[org:${orgId}]`) ||
+        store.name?.includes(orgId)
+    );
+
+    if (existingStore) {
+      return existingStore;
+    }
+
+    pageToken = nextPageToken;
+  } while (pageToken);
 
   // 新規作成
   const displayName = `[org:${orgId}] ${orgName || 'Knowledge Store'}`;
