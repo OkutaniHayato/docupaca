@@ -20,6 +20,9 @@ export interface Organization {
   /** Gemini File Search ストアID（例: org_<orgId>_rules） */
   fileSearchStoreId?: string;
 
+  /** RAGコード提案機能の有効/無効（Feature toggle） */
+  ragCodeSuggestionEnabled?: boolean;
+
   /** 作成日時 */
   created_at: FirebaseFirestore.Timestamp | Date;
 
@@ -353,6 +356,20 @@ export interface OcrHistory {
 
   /** 人間確定日時 */
   confirmedAt?: FirebaseFirestore.Timestamp | Date;
+
+  // === RAGコード提案関連 ===
+
+  /** AIによるコード提案結果 */
+  codeSuggestions?: DocumentCodeSuggestions;
+
+  /** コード提案実行日時 */
+  codeSuggestedAt?: FirebaseFirestore.Timestamp | Date;
+
+  /** コード提案がユーザーに承認されたかどうか */
+  isCodeSuggestionApproved?: boolean;
+
+  /** コード提案の承認日時 */
+  codeSuggestionApprovedAt?: FirebaseFirestore.Timestamp | Date;
 }
 
 /**

@@ -23,7 +23,8 @@ import {
   Trash2,
   X,
   Save,
-  Loader2
+  Loader2,
+  Sparkles
 } from 'lucide-react';
 
 interface OrganizationWithId extends Organization {
@@ -39,7 +40,7 @@ export default function OrganizationsPage() {
   // モーダル状態
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingOrg, setEditingOrg] = useState<OrganizationWithId | null>(null);
-  const [formData, setFormData] = useState({ name: '', description: '' });
+  const [formData, setFormData] = useState({ name: '', description: '', ragCodeSuggestionEnabled: true });
 
   // 組織一覧を取得
   useEffect(() => {
@@ -66,7 +67,7 @@ export default function OrganizationsPage() {
   // モーダルを開く（新規作成）
   const handleOpenCreate = () => {
     setEditingOrg(null);
-    setFormData({ name: '', description: '' });
+    setFormData({ name: '', description: '', ragCodeSuggestionEnabled: true });
     setIsModalOpen(true);
   };
 
@@ -76,6 +77,7 @@ export default function OrganizationsPage() {
     setFormData({
       name: org.name,
       description: org.description || '',
+      ragCodeSuggestionEnabled: org.ragCodeSuggestionEnabled !== false, // デフォルトはtrue
     });
     setIsModalOpen(true);
   };
@@ -84,7 +86,7 @@ export default function OrganizationsPage() {
   const handleCloseModal = useCallback(() => {
     setIsModalOpen(false);
     setEditingOrg(null);
-    setFormData({ name: '', description: '' });
+    setFormData({ name: '', description: '', ragCodeSuggestionEnabled: true });
   }, []);
 
   // 保存
@@ -100,6 +102,7 @@ export default function OrganizationsPage() {
         await updateDoc(doc(db, 'organizations', editingOrg.id), {
           name: formData.name.trim(),
           description: formData.description.trim() || null,
+          ragCodeSuggestionEnabled: formData.ragCodeSuggestionEnabled,
           updated_at: serverTimestamp(),
         });
       } else {
@@ -107,6 +110,7 @@ export default function OrganizationsPage() {
         await addDoc(collection(db, 'organizations'), {
           name: formData.name.trim(),
           description: formData.description.trim() || null,
+          ragCodeSuggestionEnabled: formData.ragCodeSuggestionEnabled,
           owner_id: currentUser.uid,
           created_at: serverTimestamp(),
         });
@@ -270,6 +274,32 @@ export default function OrganizationsPage() {
                   placeholder="例: 主要取引先、請求書形式Aを使用"
                   className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 text-gray-900 placeholder-gray-500 shadow-sm focus:border-green-500 focus:ring-2 focus:ring-green-500"
                 />
+              </div>
+
+              {/* RAGコード提案機能トグル */}
+              <div className="pt-2">
+                <div className="flex items-center justify-between p-4 bg-purple-50 rounded-lg border border-purple-200">
+                  <div className="flex items-center gap-3">
+                    <Sparkles className="h-5 w-5 text-purple-600" />
+                    <div>
+                      <span className="block text-sm font-medium text-gray-900">
+                        AIコード提案機能
+                      </span>
+                      <span className="text-xs text-gray-500">
+                        RAGを使ったコード提案を有効にする
+                      </span>
+                    </div>
+                  </div>
+                  <label className="relative inline-flex items-center cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={formData.ragCodeSuggestionEnabled}
+                      onChange={(e) => setFormData(prev => ({ ...prev, ragCodeSuggestionEnabled: e.target.checked }))}
+                      className="sr-only peer"
+                    />
+                    <div className="w-11 h-6 bg-gray-300 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-purple-500 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-purple-600"></div>
+                  </label>
+                </div>
               </div>
 
               <div className="flex justify-end gap-3 pt-4">

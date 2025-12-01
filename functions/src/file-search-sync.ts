@@ -716,15 +716,17 @@ export const suggestCodesHttp = functions.https.onRequest(
 
     const token = authHeader.substring(7);
 
+    let userId: string;
     try {
-      await admin.auth().verifyIdToken(token);
+      const decodedToken = await admin.auth().verifyIdToken(token);
+      userId = decodedToken.uid;
     } catch {
       res.status(401).json({ success: false, error: 'Invalid authentication token' });
       return;
     }
 
     // パラメータ取得
-    const { docId } = req.body;
+    const { docId, useRag = true } = req.body;
 
     if (!docId) {
       res.status(400).json({ success: false, error: 'Missing required parameter: docId' });
@@ -732,11 +734,79 @@ export const suggestCodesHttp = functions.https.onRequest(
     }
 
     try {
+      // ドキュメントとOCR設定を取得して権限チェック
+      const docRef = db.collection('ocr_history').doc(docId);
+      const docSnap = await docRef.get();
+
+      if (!docSnap.exists) {
+        res.status(404).json({ success: false, error: 'Document not found' });
+        return;
+      }
+
+      const docData = docSnap.data() as { setting_id?: string };
+
+      if (!docData.setting_id) {
+        res.status(400).json({ success: false, error: 'Document has no setting_id' });
+        return;
+      }
+
+      const settingDoc = await db.collection('ocr_settings').doc(docData.setting_id).get();
+      if (!settingDoc.exists) {
+        res.status(404).json({ success: false, error: 'OCR setting not found' });
+        return;
+      }
+
+      const settingData = settingDoc.data() as { owner_id: string; organization_id?: string };
+
+      // 権限チェック
+      if (settingData.owner_id !== userId) {
+        res.status(403).json({ success: false, error: 'Permission denied' });
+        return;
+      }
+
+      // 組織のRAG設定をチェック
+      if (settingData.organization_id) {
+        const orgDoc = await db.collection('organizations').doc(settingData.organization_id).get();
+        if (orgDoc.exists) {
+          const orgData = orgDoc.data() as { ragCodeSuggestionEnabled?: boolean };
+          if (orgData.ragCodeSuggestionEnabled === false) {
+            res.status(403).json({
+              success: false,
+              error: 'RAG code suggestion is disabled for this organization',
+            });
+            return;
+          }
+        }
+      }
+
+      // useRag=falseの場合は空の提案を返す
+      if (!useRag) {
+        const emptyCodeSuggestion = { code: '', confidence: 0, reason: 'RAGを使用しないため提案なし' };
+        const suggestions: DocumentCodeSuggestions = {
+          customerCode: emptyCodeSuggestion,
+          lines: [],
+        };
+
+        await docRef.update({
+          codeSuggestions: suggestions,
+          codeSuggestedAt: admin.firestore.Timestamp.now(),
+        });
+
+        res.status(200).json({
+          success: true,
+          suggestions,
+          useRag: false,
+        });
+        return;
+      }
+
+      // RAGを使ってコード提案を実行
       const suggestions = await suggestCodesForDocument(docId);
 
       res.status(200).json({
         success: true,
         suggestions,
+        useRag: true,
       });
     } catch (error) {
       functions.logger.error('Suggest codes endpoint error', error);

@@ -17,8 +17,10 @@ import {
   isExtractedValue,
   BBox,
   CorrectionLog,
+  DocumentCodeSuggestions,
+  CodeSuggestion,
 } from '@/types/ocr';
-import { AlertTriangle, CheckCircle, AlertCircle, Edit3, Save, X } from 'lucide-react';
+import { AlertTriangle, CheckCircle, AlertCircle, Edit3, Save, X, Sparkles, Loader2, Info, ThumbsUp, ThumbsDown } from 'lucide-react';
 import { updateDoc, collection, addDoc, Timestamp } from 'firebase/firestore';
 
 interface OcrSetting {
@@ -43,6 +45,13 @@ interface HistoryDetail {
   convertedImageUrls: string[]; // 複数ページの画像URL
   setting?: OcrSetting; // OCR設定情報
   setting_id?: string; // OCR設定ID
+  // コード提案関連
+  codeSuggestions?: DocumentCodeSuggestions;
+  codeSuggestedAt?: Date;
+  isCodeSuggestionApproved?: boolean;
+  codeSuggestionApprovedAt?: Date;
+  // 組織のRAG機能設定
+  ragCodeSuggestionEnabled?: boolean;
 }
 
 /**
@@ -121,6 +130,138 @@ const ConfidenceBadge: React.FC<{ confidence?: number; showIcon?: boolean }> = (
 };
 
 /**
+ * コード提案の表示バッジ
+ */
+const CodeSuggestionBadge: React.FC<{ suggestion: CodeSuggestion }> = ({ suggestion }) => {
+  const style = getConfidenceStyle(suggestion.confidence);
+
+  if (!suggestion.code) {
+    return (
+      <span className="text-gray-400 text-sm italic">提案なし</span>
+    );
+  }
+
+  return (
+    <div className={`inline-flex flex-col gap-1 px-3 py-2 rounded-lg ${style.bgColor} border ${style.borderColor}`}>
+      <div className="flex items-center gap-2">
+        <span className="font-mono font-medium text-gray-900">{suggestion.code}</span>
+        <ConfidenceBadge confidence={suggestion.confidence} />
+      </div>
+      {suggestion.reason && (
+        <div className="text-xs text-gray-600 flex items-start gap-1">
+          <Info className="w-3 h-3 mt-0.5 flex-shrink-0" />
+          <span>{suggestion.reason}</span>
+        </div>
+      )}
+    </div>
+  );
+};
+
+/**
+ * コード提案パネルコンポーネント
+ */
+const CodeSuggestionsPanel: React.FC<{
+  suggestions: DocumentCodeSuggestions;
+  onApprove: () => void;
+  onReject: () => void;
+  isApproved?: boolean;
+  isSaving?: boolean;
+}> = ({ suggestions, onApprove, onReject, isApproved, isSaving }) => {
+  return (
+    <div className="mt-6 rounded-lg border border-purple-200 bg-purple-50 shadow-sm overflow-hidden">
+      <div className="bg-purple-100 px-4 py-3 flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <Sparkles className="w-5 h-5 text-purple-600" />
+          <h3 className="text-lg font-semibold text-purple-900">AIコード提案</h3>
+          {isApproved && (
+            <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800 border border-green-200">
+              <CheckCircle className="w-3 h-3" />
+              承認済み
+            </span>
+          )}
+        </div>
+        {!isApproved && (
+          <div className="flex items-center gap-2">
+            <button
+              onClick={onReject}
+              disabled={isSaving}
+              className="inline-flex items-center gap-1 px-3 py-1.5 bg-gray-500 text-white rounded-lg hover:bg-gray-600 transition-colors text-sm font-medium disabled:opacity-50"
+            >
+              <ThumbsDown className="w-4 h-4" />
+              却下
+            </button>
+            <button
+              onClick={onApprove}
+              disabled={isSaving}
+              className="inline-flex items-center gap-1 px-3 py-1.5 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors text-sm font-medium disabled:opacity-50"
+            >
+              <ThumbsUp className="w-4 h-4" />
+              承認
+            </button>
+          </div>
+        )}
+      </div>
+
+      <div className="p-4 space-y-4">
+        {/* 注意事項 */}
+        <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3 flex items-start gap-2">
+          <AlertTriangle className="w-5 h-5 text-yellow-600 flex-shrink-0 mt-0.5" />
+          <div className="text-sm text-yellow-800">
+            <p className="font-medium">このコード提案はAIによる参考情報です</p>
+            <p className="mt-1">必ず内容を確認し、必要に応じて修正してからご使用ください。低い信頼度の提案には特に注意が必要です。</p>
+          </div>
+        </div>
+
+        {/* 顧客コード */}
+        <div>
+          <h4 className="text-sm font-semibold text-gray-700 mb-2">顧客コード</h4>
+          <CodeSuggestionBadge suggestion={suggestions.customerCode} />
+        </div>
+
+        {/* 明細行のコード */}
+        {suggestions.lines && suggestions.lines.length > 0 && (
+          <div>
+            <h4 className="text-sm font-semibold text-gray-700 mb-2">明細コード</h4>
+            <div className="overflow-x-auto">
+              <table className="min-w-full border border-gray-200 rounded-lg overflow-hidden">
+                <thead className="bg-gray-100">
+                  <tr>
+                    <th className="px-3 py-2 text-left text-xs font-semibold text-gray-600">行</th>
+                    <th className="px-3 py-2 text-left text-xs font-semibold text-gray-600">品目コード</th>
+                    <th className="px-3 py-2 text-left text-xs font-semibold text-gray-600">勘定科目</th>
+                    <th className="px-3 py-2 text-left text-xs font-semibold text-gray-600">税区分</th>
+                    <th className="px-3 py-2 text-left text-xs font-semibold text-gray-600">部門コード</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {suggestions.lines.map((line, index) => (
+                    <tr key={index} className="border-t border-gray-200 hover:bg-gray-50">
+                      <td className="px-3 py-2 text-sm font-medium text-gray-700">{line.index + 1}</td>
+                      <td className="px-3 py-2">
+                        <CodeSuggestionBadge suggestion={line.itemCode} />
+                      </td>
+                      <td className="px-3 py-2">
+                        <CodeSuggestionBadge suggestion={line.accountCode} />
+                      </td>
+                      <td className="px-3 py-2">
+                        <CodeSuggestionBadge suggestion={line.taxCategory} />
+                      </td>
+                      <td className="px-3 py-2">
+                        <CodeSuggestionBadge suggestion={line.departmentCode} />
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
+/**
  * OCR実行履歴 詳細ページ
  */
 export default function HistoryDetailPage() {
@@ -142,6 +283,12 @@ export default function HistoryDetailPage() {
   const [editedData, setEditedData] = useState<ExtractedData | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+
+  // コード提案関連の状態
+  const [isCodeSuggesting, setIsCodeSuggesting] = useState(false);
+  const [codeSuggestionError, setCodeSuggestionError] = useState<string | null>(null);
+  const [showCodeSuggestionModal, setShowCodeSuggestionModal] = useState(false);
+  const [useRag, setUseRag] = useState(true);
 
   const historyId = params.id as string;
 
@@ -276,6 +423,112 @@ export default function HistoryDetailPage() {
     }
   };
 
+  /**
+   * コード提案を実行
+   */
+  const handleRequestCodeSuggestion = async () => {
+    if (!history || !currentUser) return;
+
+    setIsCodeSuggesting(true);
+    setCodeSuggestionError(null);
+    setShowCodeSuggestionModal(false);
+
+    try {
+      const token = await currentUser.getIdToken();
+      const response = await fetch(`/api/documents/${historyId}/suggestCodes`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        },
+        body: JSON.stringify({ useRag }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || 'コード提案の実行に失敗しました');
+      }
+
+      const result = await response.json();
+
+      // 状態を更新
+      setHistory({
+        ...history,
+        codeSuggestions: result.suggestions,
+        codeSuggestedAt: new Date(),
+        isCodeSuggestionApproved: false,
+      });
+
+    } catch (err) {
+      console.error('Error requesting code suggestion:', err);
+      setCodeSuggestionError(err instanceof Error ? err.message : 'コード提案の実行に失敗しました');
+    } finally {
+      setIsCodeSuggesting(false);
+    }
+  };
+
+  /**
+   * コード提案を承認
+   */
+  const handleApproveCodeSuggestion = async () => {
+    if (!history || !currentUser) return;
+
+    setIsSaving(true);
+
+    try {
+      const historyRef = doc(db, 'ocr_history', historyId);
+      await updateDoc(historyRef, {
+        isCodeSuggestionApproved: true,
+        codeSuggestionApprovedAt: Timestamp.now(),
+      });
+
+      setHistory({
+        ...history,
+        isCodeSuggestionApproved: true,
+        codeSuggestionApprovedAt: new Date(),
+      });
+
+    } catch (err) {
+      console.error('Error approving code suggestion:', err);
+      setCodeSuggestionError('承認の保存に失敗しました');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  /**
+   * コード提案を却下（提案をクリア）
+   */
+  const handleRejectCodeSuggestion = async () => {
+    if (!history || !currentUser) return;
+
+    setIsSaving(true);
+
+    try {
+      const historyRef = doc(db, 'ocr_history', historyId);
+      await updateDoc(historyRef, {
+        codeSuggestions: null,
+        codeSuggestedAt: null,
+        isCodeSuggestionApproved: false,
+        codeSuggestionApprovedAt: null,
+      });
+
+      setHistory({
+        ...history,
+        codeSuggestions: undefined,
+        codeSuggestedAt: undefined,
+        isCodeSuggestionApproved: false,
+        codeSuggestionApprovedAt: undefined,
+      });
+
+    } catch (err) {
+      console.error('Error rejecting code suggestion:', err);
+      setCodeSuggestionError('却下の保存に失敗しました');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
   useEffect(() => {
     if (!historyId || !currentUser) return;
 
@@ -317,6 +570,17 @@ export default function HistoryDetailPage() {
           setError("この履歴にアクセスする権限がありません。");
           setIsLoading(false);
           return;
+        }
+
+        // 3.5. 組織のRAG設定を取得
+        let ragCodeSuggestionEnabled = true; // デフォルトは有効
+        if (settingData.organization_id) {
+          const orgRef = doc(db, 'organizations', settingData.organization_id);
+          const orgSnap = await getDoc(orgRef);
+          if (orgSnap.exists()) {
+            const orgData = orgSnap.data();
+            ragCodeSuggestionEnabled = orgData.ragCodeSuggestionEnabled !== false;
+          }
         }
 
         // 4. 画像URLを取得（ファイルが存在しない場合は null）
@@ -395,6 +659,13 @@ export default function HistoryDetailPage() {
             prompt: settingData.prompt_text,
             model: settingData.model_name,
           },
+          // コード提案関連
+          codeSuggestions: data.codeSuggestions || undefined,
+          codeSuggestedAt: data.codeSuggestedAt?.toDate?.() || undefined,
+          isCodeSuggestionApproved: data.isCodeSuggestionApproved || false,
+          codeSuggestionApprovedAt: data.codeSuggestionApprovedAt?.toDate?.() || undefined,
+          // 組織のRAG機能設定
+          ragCodeSuggestionEnabled,
         };
 
         setHistory(historyDetail);
@@ -650,9 +921,25 @@ export default function HistoryDetailPage() {
           {history && getStatusChip(history.status)}
         </div>
 
-        {/* --- CSVダウンロードボタン --- */}
+        {/* --- ボタン群 --- */}
         {history && Object.keys(history.extracted_data).length > 0 && (
           <div className="flex space-x-2">
+            {/* AIコード提案ボタン */}
+            {history.ragCodeSuggestionEnabled !== false && (
+              <button
+                onClick={() => setShowCodeSuggestionModal(true)}
+                disabled={isCodeSuggesting}
+                className="inline-flex items-center gap-2 rounded-lg bg-purple-600 py-2 px-4 font-semibold text-white hover:bg-purple-700 disabled:opacity-50"
+              >
+                {isCodeSuggesting ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : (
+                  <Sparkles className="w-4 h-4" />
+                )}
+                {isCodeSuggesting ? '提案中...' : 'AIコード提案'}
+              </button>
+            )}
+            {/* CSVダウンロードボタン */}
             <button
               onClick={() => handleCsvDownload(true)}
               className="rounded-lg bg-green-800 py-2 px-4 font-semibold text-white hover:bg-green-700"
@@ -668,6 +955,79 @@ export default function HistoryDetailPage() {
           </div>
         )}
       </div>
+
+      {/* AIコード提案モーダル */}
+      {showCodeSuggestionModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg p-6 max-w-md w-full mx-4 shadow-xl">
+            <div className="flex items-center gap-2 mb-4">
+              <Sparkles className="w-6 h-6 text-purple-600" />
+              <h3 className="text-lg font-semibold text-gray-900">AIコード提案</h3>
+            </div>
+
+            <p className="text-sm text-gray-600 mb-4">
+              帳票データから顧客コード、品目コード、勘定科目などを提案します。
+            </p>
+
+            {/* RAG使用オプション */}
+            <div className="bg-gray-50 rounded-lg p-4 mb-4">
+              <label className="flex items-start gap-3 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={useRag}
+                  onChange={(e) => setUseRag(e.target.checked)}
+                  className="mt-1 w-4 h-4 text-purple-600 rounded focus:ring-purple-500"
+                />
+                <div>
+                  <span className="font-medium text-gray-900">ナレッジを使用する (RAG)</span>
+                  <p className="text-xs text-gray-500 mt-1">
+                    組織に登録されたマスタデータやルールを参照して、より正確なコード提案を行います。
+                  </p>
+                </div>
+              </label>
+            </div>
+
+            {/* 注意事項 */}
+            <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3 mb-4 flex items-start gap-2">
+              <AlertTriangle className="w-5 h-5 text-yellow-600 flex-shrink-0 mt-0.5" />
+              <p className="text-sm text-yellow-800">
+                提案内容は参考情報です。必ず内容を確認してからご使用ください。
+              </p>
+            </div>
+
+            {/* ボタン */}
+            <div className="flex justify-end gap-2">
+              <button
+                onClick={() => setShowCodeSuggestionModal(false)}
+                className="px-4 py-2 text-gray-700 bg-gray-200 rounded-lg hover:bg-gray-300 font-medium"
+              >
+                キャンセル
+              </button>
+              <button
+                onClick={handleRequestCodeSuggestion}
+                className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 font-medium inline-flex items-center gap-2"
+              >
+                <Sparkles className="w-4 h-4" />
+                提案を実行
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* コード提案エラー表示 */}
+      {codeSuggestionError && (
+        <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm flex items-center gap-2">
+          <AlertCircle className="w-4 h-4" />
+          {codeSuggestionError}
+          <button
+            onClick={() => setCodeSuggestionError(null)}
+            className="ml-auto text-red-500 hover:text-red-700"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
 
@@ -1324,6 +1684,17 @@ export default function HistoryDetailPage() {
                 )}
               </div>
             </div>
+          )}
+
+          {/* --- コード提案パネル --- */}
+          {history.codeSuggestions && (
+            <CodeSuggestionsPanel
+              suggestions={history.codeSuggestions}
+              onApprove={handleApproveCodeSuggestion}
+              onReject={handleRejectCodeSuggestion}
+              isApproved={history.isCodeSuggestionApproved}
+              isSaving={isSaving}
+            />
           )}
         </div>
 
