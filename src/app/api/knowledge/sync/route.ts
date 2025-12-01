@@ -174,6 +174,9 @@ export async function POST(request: NextRequest) {
         console.log(`インポート待機中: ${importResult.name}`);
         const completedOp = await waitForUpload(importResult.name, 60000);
 
+        // デバッグ: Operation レスポンス全体をログ
+        console.log('Operation完了レスポンス:', JSON.stringify(completedOp, null, 2));
+
         // Step 3: File API の一時ファイルを削除（オプション：48時間後に自動削除されるが、すぐ削除してもOK）
         try {
           await deleteFile(fileApiResult.name);
@@ -183,19 +186,33 @@ export async function POST(request: NextRequest) {
           console.log(`File API一時ファイル削除スキップ: ${fileApiResult.name}`, deleteError);
         }
 
-        const documentName = completedOp.response?.name;
+        // importFile の場合、response内にドキュメント情報がある
+        // response: { "@type": "...", "name": "fileSearchStores/xxx/documents/yyy", ... }
+        const documentName = completedOp.response?.name ||
+                            (completedOp as unknown as { result?: { name?: string } }).result?.name;
+
+        if (!documentName) {
+          console.warn('ドキュメント名が取得できませんでした。Operation:', completedOp);
+        }
         console.log(`アップロード完了: ${documentName}`);
 
         // 成功ステータスに更新
-        await docSnapshot.ref.update({
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const updateData: Record<string, any> = {
           syncStatus: 'synced',
-          documentName: documentName, // 新しいフィールド（File Search Stores用）
-          fileId: documentName, // 互換性のため
           fileSearchStoreName: store.name,
           syncedAt: FieldValue.serverTimestamp(),
           syncError: null,
           syncRetryCount: 0,
-        });
+        };
+
+        // documentNameが取得できた場合のみ保存
+        if (documentName) {
+          updateData.documentName = documentName;
+          updateData.fileId = documentName; // 互換性のため
+        }
+
+        await docSnapshot.ref.update(updateData);
 
         syncedDocIds.push(docId);
         stats.syncedDocs++;
