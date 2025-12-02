@@ -923,7 +923,7 @@ export default function HistoryDetailPage() {
         {/* --- ボタン群 --- */}
         {history && Object.keys(history.extracted_data).length > 0 && (
           <div className="flex space-x-2">
-            {/* コード再提案ボタン（既に提案がある場合のみ表示） */}
+            {/* AI補正ボタン（既に提案がある場合のみ表示） */}
             {history.codeSuggestions && (
               <button
                 onClick={() => setShowCodeSuggestionModal(true)}
@@ -935,7 +935,7 @@ export default function HistoryDetailPage() {
                 ) : (
                   <Sparkles className="w-4 h-4" />
                 )}
-                {isCodeSuggesting ? '提案中...' : 'コード再提案'}
+                {isCodeSuggesting ? '補正中...' : 'AI補正'}
               </button>
             )}
             {/* CSVダウンロードボタン */}
@@ -955,24 +955,24 @@ export default function HistoryDetailPage() {
         )}
       </div>
 
-      {/* コード再提案モーダル */}
+      {/* AI補正モーダル */}
       {showCodeSuggestionModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <div className="bg-white rounded-lg p-6 max-w-md w-full mx-4 shadow-xl">
             <div className="flex items-center gap-2 mb-4">
               <Sparkles className="w-6 h-6 text-purple-600" />
-              <h3 className="text-lg font-semibold text-gray-900">コード再提案</h3>
+              <h3 className="text-lg font-semibold text-gray-900">AI補正</h3>
             </div>
 
             <p className="text-sm text-gray-600 mb-4">
-              ナレッジを参照して、顧客コード、品目コード、勘定科目などを再提案します。
+              ナレッジを参照して、顧客コード、品目コード、勘定科目などを再度補正します。
             </p>
 
             {/* 注意事項 */}
             <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3 mb-4 flex items-start gap-2">
               <AlertTriangle className="w-5 h-5 text-yellow-600 flex-shrink-0 mt-0.5" />
               <p className="text-sm text-yellow-800">
-                現在の提案内容は上書きされます。提案内容は参考情報ですので、必ず内容を確認してください。
+                現在の補正内容は上書きされます。補正内容は参考情報ですので、必ず内容を確認してください。
               </p>
             </div>
 
@@ -989,7 +989,7 @@ export default function HistoryDetailPage() {
                 className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 font-medium inline-flex items-center gap-2"
               >
                 <Sparkles className="w-4 h-4" />
-                再提案を実行
+                補正を実行
               </button>
             </div>
           </div>
