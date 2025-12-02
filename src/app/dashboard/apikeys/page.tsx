@@ -14,7 +14,7 @@ import {
   doc,
   deleteDoc
 } from 'firebase/firestore';
-import { Copy, Trash2, Info, Key, Code } from 'lucide-react';
+import { Copy, Trash2, Info, Key, Code, ChevronDown, ChevronUp } from 'lucide-react';
 
 interface ApiKeyMeta {
   id: string;
@@ -44,6 +44,7 @@ export default function ApiKeysPage() {
   const [showModal, setShowModal] = useState(false);
   const [copiedKeyId, setCopiedKeyId] = useState<string | null>(null);
   const [selectedExample, setSelectedExample] = useState<'curl' | 'gas'>('curl');
+  const [isExampleOpen, setIsExampleOpen] = useState(false); // アコーディオン開閉状態
   const { currentUser } = useAuth();
 
   // プロジェクトIDから Cloud Functions のエンドポイントURLを生成
@@ -281,75 +282,94 @@ curl -X POST "${apiEndpoint}" \\
         </div>
       </div>
 
-      {/* API使用例エリア */}
-      <div className="rounded-lg border border-gray-200 bg-white shadow-sm p-6">
-        <div className="flex items-start gap-3 mb-4">
-          <Code className="h-5 w-5 text-[#166534] mt-0.5 flex-shrink-0" />
-          <div className="flex-1">
-            <h3 className="font-semibold text-gray-800 mb-1">API使用例</h3>
-            <p className="text-sm text-gray-600">
-              発行したAPIキーを使用してOCR処理を実行するコード例です。
-              <strong className="text-gray-800"> setting_id</strong> には、「OCR設定」ページで作成した設定のIDを指定してください。
-            </p>
+      {/* API使用例エリア（アコーディオン） */}
+      <div className="rounded-lg border border-gray-200 bg-white shadow-sm">
+        <button
+          onClick={() => setIsExampleOpen(!isExampleOpen)}
+          className="w-full p-6 flex items-center justify-between text-left hover:bg-gray-50 transition-colors"
+        >
+          <div className="flex items-center gap-3">
+            <Code className="h-5 w-5 text-[#166534] flex-shrink-0" />
+            <div>
+              <h3 className="font-semibold text-gray-800">API使用例</h3>
+              <p className="text-sm text-gray-600">
+                発行したAPIキーを使用してOCR処理を実行するコード例
+              </p>
+            </div>
           </div>
-        </div>
+          {isExampleOpen ? (
+            <ChevronUp className="h-5 w-5 text-gray-500" />
+          ) : (
+            <ChevronDown className="h-5 w-5 text-gray-500" />
+          )}
+        </button>
 
-        {/* タブ切り替え */}
-        <div className="flex gap-2 mb-4 border-b border-gray-200">
-          <button
-            onClick={() => setSelectedExample('curl')}
-            className={`px-4 py-2 font-medium text-sm transition-colors ${
-              selectedExample === 'curl'
-                ? 'text-[#166534] border-b-2 border-[#166534]'
-                : 'text-gray-600 hover:text-gray-800'
-            }`}
-          >
-            cURL (Linux/Mac)
-          </button>
-          <button
-            onClick={() => setSelectedExample('gas')}
-            className={`px-4 py-2 font-medium text-sm transition-colors ${
-              selectedExample === 'gas'
-                ? 'text-[#166534] border-b-2 border-[#166534]'
-                : 'text-gray-600 hover:text-gray-800'
-            }`}
-          >
-            Google Apps Script
-          </button>
-        </div>
+        {isExampleOpen && (
+          <div className="px-6 pb-6 border-t border-gray-100">
+            <div className="pt-4">
+              <p className="text-sm text-gray-600 mb-4">
+                <strong className="text-gray-800">setting_id</strong> には、「OCR設定」ページで作成した設定のIDを指定してください。
+              </p>
 
-        {/* コード表示エリア */}
-        <div className="relative">
-          <pre className="bg-gray-900 text-gray-100 rounded-md p-4 overflow-x-auto text-sm font-mono">
-            <code>{selectedExample === 'curl' ? curlExample : gasExample}</code>
-          </pre>
-          <button
-            onClick={() => handleCopy(selectedExample === 'curl' ? curlExample : gasExample, 'example')}
-            className="absolute top-2 right-2 flex items-center gap-1.5 rounded-md bg-gray-700 hover:bg-gray-600 px-3 py-1.5 text-xs font-medium text-white transition-colors"
-          >
-            <Copy className="h-3 w-3" />
-            {copiedKeyId === 'example' ? 'コピーしました！' : 'コピー'}
-          </button>
-        </div>
+              {/* タブ切り替え */}
+              <div className="flex gap-2 mb-4 border-b border-gray-200">
+                <button
+                  onClick={() => setSelectedExample('curl')}
+                  className={`px-4 py-2 font-medium text-sm transition-colors ${
+                    selectedExample === 'curl'
+                      ? 'text-[#166534] border-b-2 border-[#166534]'
+                      : 'text-gray-600 hover:text-gray-800'
+                  }`}
+                >
+                  cURL (Linux/Mac)
+                </button>
+                <button
+                  onClick={() => setSelectedExample('gas')}
+                  className={`px-4 py-2 font-medium text-sm transition-colors ${
+                    selectedExample === 'gas'
+                      ? 'text-[#166534] border-b-2 border-[#166534]'
+                      : 'text-gray-600 hover:text-gray-800'
+                  }`}
+                >
+                  Google Apps Script
+                </button>
+              </div>
 
-        {/* 注意事項 */}
-        <div className="mt-4 bg-blue-50 border border-blue-200 rounded-md p-4">
-          <p className="text-sm text-blue-900 font-medium mb-2">📝 パラメータの説明</p>
-          <ul className="text-sm text-blue-800 space-y-1 list-disc list-inside">
-            <li>
-              <strong>YOUR_API_KEY</strong>: 発行したAPIキー（上記の「新しいAPIキーを作成」ボタンから生成）
-            </li>
-            <li>
-              <strong>YOUR_OCR_SETTING_ID</strong>: 使用するOCR設定のID（ダッシュボードの「OCR設定」ページで確認可能）
-            </li>
-            <li>
-              <strong>file</strong>: Base64エンコードされたPDFまたは画像ファイル
-            </li>
-            <li>
-              <strong>filename</strong>: ファイル名（オプション。拡張子から自動的にMIMEタイプを判定します）
-            </li>
-          </ul>
-        </div>
+              {/* コード表示エリア */}
+              <div className="relative">
+                <pre className="bg-gray-900 text-gray-100 rounded-md p-4 overflow-x-auto text-sm font-mono">
+                  <code>{selectedExample === 'curl' ? curlExample : gasExample}</code>
+                </pre>
+                <button
+                  onClick={() => handleCopy(selectedExample === 'curl' ? curlExample : gasExample, 'example')}
+                  className="absolute top-2 right-2 flex items-center gap-1.5 rounded-md bg-gray-700 hover:bg-gray-600 px-3 py-1.5 text-xs font-medium text-white transition-colors"
+                >
+                  <Copy className="h-3 w-3" />
+                  {copiedKeyId === 'example' ? 'コピーしました！' : 'コピー'}
+                </button>
+              </div>
+
+              {/* 注意事項 */}
+              <div className="mt-4 bg-blue-50 border border-blue-200 rounded-md p-4">
+                <p className="text-sm text-blue-900 font-medium mb-2">パラメータの説明</p>
+                <ul className="text-sm text-blue-800 space-y-1 list-disc list-inside">
+                  <li>
+                    <strong>YOUR_API_KEY</strong>: 発行したAPIキー（上記の「新しいAPIキーを作成」ボタンから生成）
+                  </li>
+                  <li>
+                    <strong>YOUR_OCR_SETTING_ID</strong>: 使用するOCR設定のID（ダッシュボードの「OCR設定」ページで確認可能）
+                  </li>
+                  <li>
+                    <strong>file</strong>: Base64エンコードされたPDFまたは画像ファイル
+                  </li>
+                  <li>
+                    <strong>filename</strong>: ファイル名（オプション。拡張子から自動的にMIMEタイプを判定します）
+                  </li>
+                </ul>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* APIキー管理エリア */}
@@ -441,7 +461,7 @@ curl -X POST "${apiEndpoint}" \\
             <div className="px-6 py-4 space-y-4">
               <div className="bg-amber-50 border border-amber-200 rounded-md p-4">
                 <p className="text-sm text-amber-900 font-medium">
-                  ⚠️ このキーは二度と表示されません。安全に保管してください。
+                  このキーは二度と表示されません。安全に保管してください。
                 </p>
                 <p className="text-xs text-amber-800 mt-1">
                   このAPIキーを紛失した場合、新しいキーを生成する必要があります。

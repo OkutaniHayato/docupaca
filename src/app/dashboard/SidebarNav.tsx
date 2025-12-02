@@ -4,6 +4,7 @@ import React from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
+import { useSidebar } from '@/context/SidebarContext';
 import {
   LayoutDashboard,
   Settings,
@@ -56,6 +57,7 @@ const menuItems = [
 export default function SidebarNav() {
   const pathname = usePathname();
   const { logout } = useAuth();
+  const { isCollapsed } = useSidebar();
 
   return (
     <div className="flex h-full flex-col justify-between overflow-y-auto">
@@ -72,10 +74,11 @@ export default function SidebarNav() {
                 isActive
                   ? 'bg-green-700 text-white'
                   : 'text-white hover:bg-green-700'
-              }`}
+              } ${isCollapsed ? 'justify-center' : ''}`}
+              title={isCollapsed ? item.name : undefined}
             >
-              <item.icon className="mr-3 h-5 w-5" />
-              {item.name}
+              <item.icon className={`h-5 w-5 ${isCollapsed ? '' : 'mr-3'}`} />
+              {!isCollapsed && item.name}
             </Link>
           );
         })}
@@ -85,10 +88,13 @@ export default function SidebarNav() {
       <div className="pb-4">
         <button
           onClick={() => logout()}
-          className="flex w-full items-center rounded px-4 py-2.5 text-white transition duration-200 hover:bg-green-700"
+          className={`flex w-full items-center rounded px-4 py-2.5 text-white transition duration-200 hover:bg-green-700 ${
+            isCollapsed ? 'justify-center' : ''
+          }`}
+          title={isCollapsed ? 'ログアウト' : undefined}
         >
-          <LogOut className="mr-3 h-5 w-5" />
-          ログアウト
+          <LogOut className={`h-5 w-5 ${isCollapsed ? '' : 'mr-3'}`} />
+          {!isCollapsed && 'ログアウト'}
         </button>
       </div>
     </div>
