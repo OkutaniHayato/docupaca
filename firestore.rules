@@ -3,27 +3,179 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
     // ========================================
-    // 🚧 開発中：テストモード（全て許可）
+    // ヘルパー関数
     // ========================================
-    // ⚠️ 本番リリース前に必ず変更すること
-    // 
-    // 本番用ルールの例：
-    // function isAuthenticated() {
-    //   return request.auth != null;
-    // }
-    // match /users/{userId} {
-    //   allow read: if isAuthenticated();
-    //   allow write: if isAuthenticated() && request.auth.uid == userId;
-    // }
-    //
-    // corrections コレクション（訂正ログ）:
-    // match /corrections/{correctionId} {
-    //   allow read, write: if isAuthenticated();
-    // }
-    // ========================================
-    
-    match /{document=**} {
-      allow read, write: if true;  // 開発中のみ
+
+    // 認証済みユーザーかどうか
+    function isAuthenticated() {
+      return request.auth != null;
     }
+
+    // 自分自身かどうか
+    function isOwner(userId) {
+      return request.auth != null && request.auth.uid == userId;
+    }
+
+    // 組織のオーナーかどうか
+    function isOrgOwner(orgId) {
+      return request.auth != null
+        && exists(/databases/$(database)/documents/organizations/$(orgId))
+        && get(/databases/$(database)/documents/organizations/$(orgId)).data.owner_id == request.auth.uid;
+    }
+
+    // 組織のメンバーかどうか（将来のチームメンバー機能用）
+    function isOrgMember(orgId) {
+      return isOrgOwner(orgId);
+      // 将来的にはメンバー機能を追加:
+      // || request.auth.uid in get(/databases/$(database)/documents/organizations/$(orgId)).data.member_ids;
+    }
+
+    // リソースのオーナーかどうか
+    function isResourceOwner() {
+      return request.auth != null && resource.data.owner_id == request.auth.uid;
+    }
+
+    // ========================================
+    // ユーザープロファイル
+    // ========================================
+    match /users/{userId} {
+      // 自分自身のプロファイルのみ読み書き可能
+      allow read, write: if isOwner(userId);
+    }
+
+    // ========================================
+    // 組織（Organizations）
+    // ========================================
+    match /organizations/{orgId} {
+      // 認証済みユーザーは組織を作成可能
+      allow create: if isAuthenticated()
+        && request.resource.data.owner_id == request.auth.uid;
+
+      // オーナーのみ読み取り・更新・削除可能
+      allow read, update, delete: if isOrgOwner(orgId);
+    }
+
+    // ========================================
+    // OCR設定（OCR Settings）
+    // ========================================
+    match /ocr_settings/{settingId} {
+      // 認証済みユーザーは設定を作成可能（自分がオーナーとして）
+      allow create: if isAuthenticated()
+        && request.resource.data.owner_id == request.auth.uid;
+
+      // オーナーのみ読み取り・更新・削除可能
+      allow read, update, delete: if isResourceOwner();
+
+      // 組織に紐づいている場合は組織オーナーも読み取り可能
+      allow read: if resource.data.organization_id != null
+        && isOrgOwner(resource.data.organization_id);
+    }
+
+    // ========================================
+    // OCR履歴（OCR History）
+    // ========================================
+    match /ocr_history/{historyId} {
+      // OCR設定のオーナーのみアクセス可能
+      function getSettingOwnerId() {
+        return get(/databases/$(database)/documents/ocr_settings/$(resource.data.setting_id)).data.owner_id;
+      }
+
+      function isHistoryOwner() {
+        return request.auth != null && getSettingOwnerId() == request.auth.uid;
+      }
+
+      // 作成: 認証済みユーザーでOCR設定のオーナーである場合
+      allow create: if isAuthenticated()
+        && exists(/databases/$(database)/documents/ocr_settings/$(request.resource.data.setting_id))
+        && get(/databases/$(database)/documents/ocr_settings/$(request.resource.data.setting_id)).data.owner_id == request.auth.uid;
+
+      // 読み取り・更新: OCR設定のオーナーのみ
+      allow read, update: if isHistoryOwner();
+
+      // 削除: OCR設定のオーナーのみ
+      allow delete: if isHistoryOwner();
+    }
+
+    // ========================================
+    // 訂正ログ（Corrections）
+    // ========================================
+    match /corrections/{correctionId} {
+      // 認証済みユーザーは訂正ログを作成・読み取り可能
+      // （訂正はユーザー固有ではなく、OCR設定に紐づく学習データ）
+      allow read, write: if isAuthenticated();
+    }
+
+    // ========================================
+    // 組織ナレッジドキュメント（Organization Learning Docs）
+    // ========================================
+    match /orgLearningDocs/{docId} {
+      // 組織オーナーのみ作成可能
+      allow create: if isAuthenticated()
+        && request.resource.data.orgId != null
+        && isOrgOwner(request.resource.data.orgId);
+
+      // 組織オーナーのみ読み取り・更新・削除可能
+      allow read, update, delete: if resource.data.orgId != null
+        && isOrgOwner(resource.data.orgId);
+    }
+
+    // ========================================
+    // 同期履歴（Organization Learning Sync History）
+    // ========================================
+    match /org_learning_sync_history/{historyId} {
+      // 組織オーナーは読み取り可能（履歴の確認）
+      allow read: if resource.data.orgId != null
+        && isOrgOwner(resource.data.orgId);
+
+      // 作成・更新・削除はCloud Functions経由のみ（直接書き込み禁止）
+      allow create, update, delete: if false;
+    }
+
+    // ========================================
+    // システムアラート（System Alerts）
+    // ========================================
+    match /system_alerts/{alertId} {
+      // 管理者のみ読み取り可能（将来の管理者機能用）
+      // 現在は認証済みユーザーで組織オーナーの場合のみ自分の組織のアラートを閲覧可能
+      allow read: if isAuthenticated()
+        && resource.data.context.orgId != null
+        && isOrgOwner(resource.data.context.orgId);
+
+      // アラートの確認（acknowledged）更新のみ許可
+      allow update: if isAuthenticated()
+        && resource.data.context.orgId != null
+        && isOrgOwner(resource.data.context.orgId)
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['acknowledged', 'acknowledgedAt', 'acknowledgedBy']);
+
+      // 作成・削除はCloud Functions経由のみ
+      allow create, delete: if false;
+    }
+
+    // ========================================
+    // 監査ログ（Audit Logs）- 将来の実装用
+    // ========================================
+    match /audit_logs/{logId} {
+      // 組織オーナーは読み取り可能
+      allow read: if resource.data.orgId != null
+        && isOrgOwner(resource.data.orgId);
+
+      // 作成・更新・削除はCloud Functions経由のみ
+      allow create, update, delete: if false;
+    }
+
+    // ========================================
+    // レビュー記録（Review Records）- 将来の実装用
+    // ========================================
+    match /review_records/{recordId} {
+      // 組織オーナーのみアクセス可能
+      allow read, write: if resource.data.orgId != null
+        && isOrgOwner(resource.data.orgId);
+    }
+
+    // ========================================
+    // ⚠️ デフォルトルール: その他のコレクションは拒否
+    // ========================================
+    // 明示的に許可されていないコレクションへのアクセスは拒否
+    // 新しいコレクションを追加する場合は、上記にルールを追加すること
   }
 }
