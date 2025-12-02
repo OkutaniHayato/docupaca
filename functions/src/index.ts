@@ -331,8 +331,12 @@ interface OcrSetting {
   extraction_fields: ExtractionField[];
   model_name: string;
   created_at: admin.firestore.Timestamp;
+  // 組織ID
+  organization_id?: string;
   // 学習データ（機能④）
   learning?: LearningData;
+  // RAGコード提案（機能④）
+  enableRagCodeSuggestion?: boolean;
 }
 
 // OCR履歴のデータ型

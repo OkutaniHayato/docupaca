@@ -89,6 +89,15 @@ export interface OrgLearningDoc {
   /** アップロードファイルのサイズ（バイト） */
   sourceFileSize?: number;
 
+  // === OCR設定との紐付け ===
+
+  /**
+   * このナレッジドキュメントを使用するOCR設定IDの配列
+   * - 空配列または未設定: すべてのOCR設定で使用可能
+   * - 特定のIDを指定: 指定されたOCR設定でのみ使用
+   */
+  settingIds?: string[];
+
   // === File Search 同期関連 ===
 
   /** Gemini File Search でのファイルID（同期後に設定） */

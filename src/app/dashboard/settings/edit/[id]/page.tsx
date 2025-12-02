@@ -5,7 +5,7 @@ import { useRouter, useParams } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
 import { db, storage } from '@/config/firebase';
 
-import { doc, getDoc, updateDoc } from 'firebase/firestore';
+import { doc, getDoc, updateDoc, collection, query, where, getDocs, writeBatch } from 'firebase/firestore';
 import { ref, uploadBytes } from 'firebase/storage'; 
 import OcrSettingForm, { OcrSettingFormData } from '../../OcrSettingForm'; 
 
@@ -61,6 +61,8 @@ export default function EditOcrSettingPage() {
             displayName: data.displayName,
             templateType: data.templateType,
             exampleKeywords: data.exampleKeywords,
+            // RAGコード提案
+            enableRagCodeSuggestion: data.enableRagCodeSuggestion,
           });
           
         } else {
@@ -76,6 +78,61 @@ export default function EditOcrSettingPage() {
 
     fetchSettingData();
   }, [settingId, currentUser]);
+
+  /**
+   * ナレッジドキュメントのsettingIds更新
+   * - リンク対象のドキュメント: settingIdを追加
+   * - リンク解除対象のドキュメント: settingIdを削除
+   */
+  const updateKnowledgeDocLinks = async (
+    orgId: string,
+    currentSettingId: string,
+    linkedKnowledgeIds: string[]
+  ) => {
+    // 組織のナレッジドキュメントを取得
+    const q = query(
+      collection(db, 'orgLearningDocs'),
+      where('orgId', '==', orgId)
+    );
+    const snapshot = await getDocs(q);
+
+    if (snapshot.empty) return;
+
+    const batch = writeBatch(db);
+    let hasChanges = false;
+
+    for (const docSnap of snapshot.docs) {
+      const docData = docSnap.data();
+      const currentSettingIds: string[] = docData.settingIds || [];
+      const isUniversal = currentSettingIds.length === 0;
+      const isCurrentlyLinked = currentSettingIds.includes(currentSettingId);
+      const shouldBeLinked = linkedKnowledgeIds.includes(docSnap.id);
+
+      // ユニバーサルドキュメントは変更しない（常にすべての設定に適用）
+      if (isUniversal) {
+        continue;
+      }
+
+      if (shouldBeLinked && !isCurrentlyLinked) {
+        // リンクを追加
+        batch.update(docSnap.ref, {
+          settingIds: [...currentSettingIds, currentSettingId]
+        });
+        hasChanges = true;
+      } else if (!shouldBeLinked && isCurrentlyLinked) {
+        // リンクを解除
+        batch.update(docSnap.ref, {
+          settingIds: currentSettingIds.filter(id => id !== currentSettingId)
+        });
+        hasChanges = true;
+      }
+    }
+
+    if (hasChanges) {
+      await batch.commit();
+      console.log('ナレッジドキュメントのリンクを更新しました');
+    }
+  };
 
   /**
    * 設定の更新処理（ファイルアップロード含む）
@@ -128,7 +185,19 @@ export default function EditOcrSettingPage() {
         ? data.exampleKeywords
         : null;
 
+      // RAGコード提案
+      updateData.enableRagCodeSuggestion = data.enableRagCodeSuggestion || false;
+
       await updateDoc(docRef, updateData);
+
+      // ナレッジドキュメントのsettingIds更新
+      if (data.organization_id && data.linkedKnowledgeIds) {
+        await updateKnowledgeDocLinks(
+          data.organization_id,
+          settingId,
+          data.linkedKnowledgeIds
+        );
+      }
 
       // 設定一覧ページに戻る
       router.push('/dashboard/settings');
@@ -170,6 +239,7 @@ export default function EditOcrSettingPage() {
           onSave={handleUpdate}
           isLoading={isSaving}
           saveButtonText="更新する"
+          settingId={settingId}
         />
       )}
     </div>

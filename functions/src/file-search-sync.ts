@@ -49,6 +49,12 @@ interface OrgLearningDoc {
   updatedAt: admin.firestore.Timestamp;
   createdBy: string;
   updatedBy?: string;
+  /**
+   * このナレッジドキュメントを使用するOCR設定IDの配列
+   * - 空配列または未設定: すべてのOCR設定で使用可能
+   * - 特定のIDを指定: 指定されたOCR設定でのみ使用
+   */
+  settingIds?: string[];
   fileId?: string;
   syncedAt?: admin.firestore.Timestamp;
   syncStatus?: 'pending' | 'syncing' | 'synced' | 'failed';
@@ -188,8 +194,11 @@ function getContentSizeBytes(content: string): number {
 
 /**
  * 組織のナレッジドキュメントを取得してプロンプト用に整形する
+ *
+ * @param orgId 組織ID
+ * @param settingId OCR設定ID（オプション）- 指定すると、その設定に紐付いたナレッジのみ取得
  */
-export async function getOrgKnowledgeForPrompt(orgId: string): Promise<string> {
+export async function getOrgKnowledgeForPrompt(orgId: string, settingId?: string): Promise<string> {
   const docsSnap = await db.collection('orgLearningDocs')
     .where('orgId', '==', orgId)
     .get();
@@ -203,11 +212,22 @@ export async function getOrgKnowledgeForPrompt(orgId: string): Promise<string> {
 
   for (const docSnap of docsSnap.docs) {
     const doc = docSnap.data() as OrgLearningDoc;
+
+    // settingIdが指定されている場合、フィルタリングを行う
+    if (settingId && doc.settingIds && doc.settingIds.length > 0) {
+      // settingIdsが設定されていて、指定されたsettingIdが含まれていない場合はスキップ
+      if (!doc.settingIds.includes(settingId)) {
+        continue;
+      }
+    }
+    // settingIdsが未設定または空配列の場合は、すべてのOCR設定で使用可能（スキップしない）
+
     const content = formatDocumentContent(doc);
 
     if (totalChars + content.length > FILE_SEARCH_LIMITS.MAX_KNOWLEDGE_CHARS) {
       functions.logger.warn('Knowledge content truncated due to size limit', {
         orgId,
+        settingId,
         totalChars,
         limit: FILE_SEARCH_LIMITS.MAX_KNOWLEDGE_CHARS,
       });
@@ -516,8 +536,8 @@ export async function suggestCodesForDocument(docId: string): Promise<DocumentCo
     throw new Error('OCR setting has no organization_id');
   }
 
-  // 3. 組織のナレッジを取得
-  const knowledge = await getOrgKnowledgeForPrompt(orgId);
+  // 3. 組織のナレッジを取得（OCR設定IDでフィルタリング）
+  const knowledge = await getOrgKnowledgeForPrompt(orgId, docData.setting_id);
 
   // 4. Gemini API クライアントを初期化
   const apiKey = geminiApiKey.value();

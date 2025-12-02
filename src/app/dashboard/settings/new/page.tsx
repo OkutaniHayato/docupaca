@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
 import { db, storage } from '@/config/firebase';
-import { collection, addDoc, serverTimestamp, doc, getDoc } from 'firebase/firestore';
+import { collection, addDoc, serverTimestamp, doc, getDoc, query, where, getDocs, writeBatch } from 'firebase/firestore';
 import { ref, uploadBytes } from 'firebase/storage';
 
 import OcrSettingForm, { OcrSettingFormData } from '../OcrSettingForm'; 
@@ -64,6 +64,52 @@ export default function NewOcrSettingPage() {
   }, [templateId, currentUser]);
 
   /**
+   * ナレッジドキュメントのsettingIds更新
+   * 新規作成時は対象ドキュメントにsettingIdを追加
+   */
+  const updateKnowledgeDocLinks = async (
+    orgId: string,
+    newSettingId: string,
+    linkedKnowledgeIds: string[]
+  ) => {
+    const q = query(
+      collection(db, 'orgLearningDocs'),
+      where('orgId', '==', orgId)
+    );
+    const snapshot = await getDocs(q);
+
+    if (snapshot.empty) return;
+
+    const batch = writeBatch(db);
+    let hasChanges = false;
+
+    for (const docSnap of snapshot.docs) {
+      const docData = docSnap.data();
+      const currentSettingIds: string[] = docData.settingIds || [];
+      const isUniversal = currentSettingIds.length === 0;
+      const shouldBeLinked = linkedKnowledgeIds.includes(docSnap.id);
+
+      // ユニバーサルドキュメントは変更しない
+      if (isUniversal) {
+        continue;
+      }
+
+      // リンクが必要なドキュメントにsettingIdを追加
+      if (shouldBeLinked && !currentSettingIds.includes(newSettingId)) {
+        batch.update(docSnap.ref, {
+          settingIds: [...currentSettingIds, newSettingId]
+        });
+        hasChanges = true;
+      }
+    }
+
+    if (hasChanges) {
+      await batch.commit();
+      console.log('ナレッジドキュメントのリンクを更新しました');
+    }
+  };
+
+  /**
    * フォームの保存処理（ファイルアップロード含む）
    */
   const handleSave = async (data: OcrSettingFormData, file: File | null) => {
@@ -115,7 +161,21 @@ export default function NewOcrSettingPage() {
         settingData.exampleKeywords = data.exampleKeywords;
       }
 
-      await addDoc(collection(db, "ocr_settings"), settingData);
+      // RAGコード提案
+      if (data.enableRagCodeSuggestion) {
+        settingData.enableRagCodeSuggestion = data.enableRagCodeSuggestion;
+      }
+
+      const docRef = await addDoc(collection(db, "ocr_settings"), settingData);
+
+      // ナレッジドキュメントのsettingIds更新（新規設定の場合）
+      if (data.organization_id && data.linkedKnowledgeIds && data.linkedKnowledgeIds.length > 0) {
+        await updateKnowledgeDocLinks(
+          data.organization_id,
+          docRef.id,
+          data.linkedKnowledgeIds
+        );
+      }
 
       // 設定一覧ページに戻る
       router.push('/dashboard/settings');
