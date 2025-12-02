@@ -11,15 +11,23 @@ import {
   ChevronDown,
   ChevronRight,
   Plus,
-  Trash2
+  Trash2,
+  BookOpen,
+  Check,
+  X
 } from 'lucide-react';
-import { ExtractionField, Organization } from '@/types/ocr';
+import { ExtractionField, Organization, OrgLearningDoc } from '@/types/ocr';
 import { useAuth } from '@/context/AuthContext';
 import { db } from '@/config/firebase';
 import { collection, query, where, orderBy, onSnapshot } from 'firebase/firestore';
 
 // 組織の型（IDを含む）
 interface OrganizationWithId extends Organization {
+  id: string;
+}
+
+// ナレッジドキュメントの型（IDを含む）
+interface OrgLearningDocWithId extends OrgLearningDoc {
   id: string;
 }
 
@@ -49,6 +57,10 @@ export interface OcrSettingFormData {
   displayName?: string;
   templateType?: string;
   exampleKeywords?: string[];
+  // RAGコード提案（機能④）
+  enableRagCodeSuggestion?: boolean;
+  // 紐付けるナレッジドキュメントID（RAG用）
+  linkedKnowledgeIds?: string[];
 }
 
 // 後方互換性のため、ExtractionFieldを再エクスポート
@@ -60,6 +72,7 @@ interface OcrSettingFormProps {
   isLoading: boolean;
   saveButtonText?: string;
   isTemplateMode?: boolean; // テンプレートからコピーモード
+  settingId?: string; // 編集モード時のOCR設定ID（ナレッジ紐付けに使用）
 }
 
 interface PreviewContentProps {
@@ -161,7 +174,8 @@ export default function OcrSettingForm({
   onSave,
   isLoading,
   saveButtonText = "保存する",
-  isTemplateMode = false
+  isTemplateMode = false,
+  settingId
 }: OcrSettingFormProps) {
   const { currentUser } = useAuth();
 
@@ -172,11 +186,16 @@ export default function OcrSettingForm({
       prompt_text: '',
       extraction_fields: [],
       organization_id: '',
+      enableRagCodeSuggestion: false,
+      linkedKnowledgeIds: [],
     }
   );
 
   // 組織一覧
   const [organizations, setOrganizations] = useState<OrganizationWithId[]>([]);
+
+  // 選択された組織のナレッジドキュメント一覧
+  const [knowledgeDocs, setKnowledgeDocs] = useState<OrgLearningDocWithId[]>([]);
 
   // 組織一覧を取得
   useEffect(() => {
@@ -198,6 +217,41 @@ export default function OcrSettingForm({
 
     return () => unsubscribe();
   }, [currentUser]);
+
+  // 選択された組織のナレッジドキュメントを取得
+  useEffect(() => {
+    if (!formData.organization_id) {
+      setKnowledgeDocs([]);
+      return;
+    }
+
+    const q = query(
+      collection(db, 'orgLearningDocs'),
+      where('orgId', '==', formData.organization_id),
+      orderBy('title', 'asc')
+    );
+
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const docs: OrgLearningDocWithId[] = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data(),
+      } as OrgLearningDocWithId));
+      setKnowledgeDocs(docs);
+
+      // settingIdがある場合、現在リンクされているナレッジを初期選択
+      if (settingId && !formData.linkedKnowledgeIds?.length) {
+        const linkedIds = docs
+          .filter(doc => !doc.settingIds || doc.settingIds.length === 0 || doc.settingIds.includes(settingId))
+          .map(doc => doc.id);
+        setFormData(prev => ({
+          ...prev,
+          linkedKnowledgeIds: linkedIds,
+        }));
+      }
+    });
+
+    return () => unsubscribe();
+  }, [formData.organization_id, settingId]);
 
   // initialDataが変更されたときにformDataを更新
   useEffect(() => {
@@ -240,7 +294,7 @@ export default function OcrSettingForm({
   const [tempChildName, setTempChildName] = useState('');
   const [tempChildInstruction, setTempChildInstruction] = useState('');
 
-  const [layout, setLayout] = useState<'form-left' | 'form-right'>('form-left');
+  const [layout, setLayout] = useState<'form-left' | 'form-right'>('form-right');
   const [uploadedFile, setUploadedFile] = useState<File | null>(null);
   const [imagePreviewUrl, setImagePreviewUrl] = useState<string | null>(null);
 
@@ -554,6 +608,150 @@ export default function OcrSettingForm({
             <option value="gemini-2.5-pro">Gemini 2.5 Pro (最高性能)</option>
           </select>
         </div>
+
+        {/* RAGコード提案機能トグル（組織が選択されている場合のみ表示） */}
+        {formData.organization_id && (
+          <div className="mt-4">
+            <div className="flex items-center justify-between p-4 bg-purple-50 rounded-lg border border-purple-200">
+              <div className="flex items-center gap-3">
+                <Sparkles className="h-5 w-5 text-purple-600" />
+                <div>
+                  <span className="block text-sm font-medium text-gray-900">
+                    RAGによるコード提案
+                  </span>
+                  <span className="text-xs text-gray-500">
+                    OCR実行時に顧客コード・品目コード・勘定科目などを自動提案
+                  </span>
+                </div>
+              </div>
+              <label className="relative inline-flex items-center cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={formData.enableRagCodeSuggestion || false}
+                  onChange={(e) => setFormData(prev => ({ ...prev, enableRagCodeSuggestion: e.target.checked }))}
+                  className="sr-only peer"
+                  disabled={isLoading}
+                />
+                <div className="w-11 h-6 bg-gray-300 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-purple-500 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-purple-600"></div>
+              </label>
+            </div>
+
+            {/* ナレッジドキュメント選択（RAG有効時のみ表示） */}
+            {formData.enableRagCodeSuggestion && (
+              <div className="mt-3 p-4 bg-blue-50 rounded-lg border border-blue-200">
+                <div className="flex items-center justify-between mb-3">
+                  <div className="flex items-center gap-2">
+                    <BookOpen className="h-5 w-5 text-blue-600" />
+                    <span className="text-sm font-medium text-gray-900">
+                      使用するナレッジ
+                    </span>
+                  </div>
+                  {knowledgeDocs.length > 0 && (
+                    <span className="text-xs text-gray-500">
+                      {formData.linkedKnowledgeIds?.length || 0}/{knowledgeDocs.length} 件選択中
+                    </span>
+                  )}
+                </div>
+
+                {knowledgeDocs.length === 0 ? (
+                  <div className="text-sm text-gray-500">
+                    <p>この組織にはナレッジが登録されていません。</p>
+                    <Link
+                      href={`/dashboard/organizations/${formData.organization_id}/knowledge`}
+                      className="text-blue-600 hover:underline"
+                    >
+                      ナレッジを登録する →
+                    </Link>
+                  </div>
+                ) : (
+                  <>
+                    {/* 選択済みナレッジをタグで表示 */}
+                    <div className="flex flex-wrap gap-2 mb-3">
+                      {knowledgeDocs
+                        .filter(doc => formData.linkedKnowledgeIds?.includes(doc.id))
+                        .map(doc => {
+                          const isUniversal = !doc.settingIds || doc.settingIds.length === 0;
+                          return (
+                            <span
+                              key={doc.id}
+                              className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium ${
+                                isUniversal
+                                  ? 'bg-green-100 text-green-800 border border-green-200'
+                                  : 'bg-blue-100 text-blue-800 border border-blue-200'
+                              }`}
+                            >
+                              {doc.title}
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const newIds = (formData.linkedKnowledgeIds || []).filter(id => id !== doc.id);
+                                  setFormData(prev => ({ ...prev, linkedKnowledgeIds: newIds }));
+                                }}
+                                className="hover:opacity-70"
+                                disabled={isLoading}
+                              >
+                                <X className="h-3 w-3" />
+                              </button>
+                            </span>
+                          );
+                        })}
+                      {(!formData.linkedKnowledgeIds || formData.linkedKnowledgeIds.length === 0) && (
+                        <span className="text-xs text-gray-400 italic">ナレッジが選択されていません</span>
+                      )}
+                    </div>
+
+                    {/* ナレッジ選択リスト */}
+                    <div className="space-y-1 max-h-40 overflow-y-auto border border-gray-200 rounded-md bg-white p-2">
+                      {knowledgeDocs.map((doc) => {
+                        const isLinked = formData.linkedKnowledgeIds?.includes(doc.id) ?? false;
+                        const isUniversal = !doc.settingIds || doc.settingIds.length === 0;
+
+                        return (
+                          <label
+                            key={doc.id}
+                            className={`flex items-center gap-2 p-2 rounded cursor-pointer transition-colors ${
+                              isLinked ? 'bg-blue-50' : 'hover:bg-gray-50'
+                            }`}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={isLinked}
+                              onChange={(e) => {
+                                const newIds = e.target.checked
+                                  ? [...(formData.linkedKnowledgeIds || []), doc.id]
+                                  : (formData.linkedKnowledgeIds || []).filter(id => id !== doc.id);
+                                setFormData(prev => ({ ...prev, linkedKnowledgeIds: newIds }));
+                              }}
+                              className="h-4 w-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                              disabled={isLoading}
+                            />
+                            <div className="flex-1 min-w-0 flex items-center gap-2">
+                              <span className="text-sm text-gray-900 truncate">{doc.title}</span>
+                              {isUniversal && (
+                                <span className="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-green-100 text-green-700">
+                                  共通
+                                </span>
+                              )}
+                              <span className="text-xs text-gray-400">{doc.type}</span>
+                            </div>
+                          </label>
+                        );
+                      })}
+                    </div>
+
+                    <p className="mt-2 text-xs text-gray-500">
+                      「共通」のナレッジは全OCR設定で使用されます
+                    </p>
+                  </>
+                )}
+              </div>
+            )}
+
+            <p className="mt-1 text-xs text-gray-500">
+              有効にすると、OCR実行完了時にナレッジを参照してコード提案を自動実行します
+            </p>
+          </div>
+        )}
       </div>
 
       {/* --- AI自動判定用メタ情報 --- */}

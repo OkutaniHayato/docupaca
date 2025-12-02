@@ -20,6 +20,9 @@ export interface Organization {
   /** Gemini File Search ストアID（例: org_<orgId>_rules） */
   fileSearchStoreId?: string;
 
+  /** RAGコード提案機能の有効/無効（Feature toggle） */
+  ragCodeSuggestionEnabled?: boolean;
+
   /** 作成日時 */
   created_at: FirebaseFirestore.Timestamp | Date;
 
@@ -85,6 +88,15 @@ export interface OrgLearningDoc {
 
   /** アップロードファイルのサイズ（バイト） */
   sourceFileSize?: number;
+
+  // === OCR設定との紐付け ===
+
+  /**
+   * このナレッジドキュメントを使用するOCR設定IDの配列
+   * - 空配列または未設定: すべてのOCR設定で使用可能
+   * - 特定のIDを指定: 指定されたOCR設定でのみ使用
+   */
+  settingIds?: string[];
 
   // === File Search 同期関連 ===
 
@@ -285,6 +297,11 @@ export interface OcrSetting {
 
   /** 学習データ（訂正ログから自動生成） */
   learning?: LearningData;
+
+  // === RAGコード提案（機能④） ===
+
+  /** RAGによるコード提案を有効にするか（デフォルト: false） */
+  enableRagCodeSuggestion?: boolean;
 }
 
 /**
@@ -353,6 +370,20 @@ export interface OcrHistory {
 
   /** 人間確定日時 */
   confirmedAt?: FirebaseFirestore.Timestamp | Date;
+
+  // === RAGコード提案関連 ===
+
+  /** AIによるコード提案結果 */
+  codeSuggestions?: DocumentCodeSuggestions;
+
+  /** コード提案実行日時 */
+  codeSuggestedAt?: FirebaseFirestore.Timestamp | Date;
+
+  /** コード提案がユーザーに承認されたかどうか */
+  isCodeSuggestionApproved?: boolean;
+
+  /** コード提案の承認日時 */
+  codeSuggestionApprovedAt?: FirebaseFirestore.Timestamp | Date;
 }
 
 /**

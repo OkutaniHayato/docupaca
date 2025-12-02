@@ -8,6 +8,7 @@ import sharp from 'sharp';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
+import { suggestCodesForDocument } from './file-search-sync';
 
 // Firebase Admin初期化
 admin.initializeApp();
@@ -330,8 +331,12 @@ interface OcrSetting {
   extraction_fields: ExtractionField[];
   model_name: string;
   created_at: admin.firestore.Timestamp;
+  // 組織ID
+  organization_id?: string;
   // 学習データ（機能④）
   learning?: LearningData;
+  // RAGコード提案（機能④）
+  enableRagCodeSuggestion?: boolean;
 }
 
 // OCR履歴のデータ型
@@ -872,10 +877,24 @@ ${jsonSchemaExample}
 
       functions.logger.info(`OCR処理完了: history_id=${historyRef.id}`);
 
+      // 7. RAGコード提案を自動実行（設定で有効な場合）
+      let codeSuggestions = null;
+      if (setting.enableRagCodeSuggestion) {
+        try {
+          functions.logger.info(`RAGコード提案を実行中: history_id=${historyRef.id}`);
+          codeSuggestions = await suggestCodesForDocument(historyRef.id);
+          functions.logger.info(`RAGコード提案完了: history_id=${historyRef.id}`);
+        } catch (ragError) {
+          // RAGコード提案のエラーはログに記録するが、OCR処理全体は成功として扱う
+          functions.logger.warn(`RAGコード提案でエラーが発生しましたが、OCR処理は成功しています: ${ragError}`);
+        }
+      }
+
       return {
         success: true,
         history_id: historyRef.id,
         extracted_data: extractedData,
+        codeSuggestions,
       };
 
     } catch (error) {
@@ -1844,11 +1863,25 @@ ${jsonSchemaExample}
 
       functions.logger.info(`OCR processing completed: history_id=${historyRef.id}`);
 
-      // 9. 成功レスポンスを返す
+      // 9. RAGコード提案を自動実行（設定で有効な場合）
+      let codeSuggestions = null;
+      if (setting.enableRagCodeSuggestion) {
+        try {
+          functions.logger.info(`RAG code suggestion starting: history_id=${historyRef.id}`);
+          codeSuggestions = await suggestCodesForDocument(historyRef.id);
+          functions.logger.info(`RAG code suggestion completed: history_id=${historyRef.id}`);
+        } catch (ragError) {
+          // RAGコード提案のエラーはログに記録するが、OCR処理全体は成功として扱う
+          functions.logger.warn(`RAG code suggestion error (OCR succeeded): ${ragError}`);
+        }
+      }
+
+      // 10. 成功レスポンスを返す
       res.status(200).json({
         success: true,
         history_id: historyRef.id,
         extracted_data: extractedData,
+        codeSuggestions,
       });
 
     } catch (error) {
