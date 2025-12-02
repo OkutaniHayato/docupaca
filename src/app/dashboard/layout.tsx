@@ -19,34 +19,34 @@ function DashboardContent({ children }: { children: React.ReactNode }) {
           isCollapsed ? 'w-16' : 'w-64'
         }`}
       >
-        {/* ロゴエリア */}
-        <div className={`p-4 flex items-center ${isCollapsed ? 'justify-center' : ''}`}>
-          <Image
-            src="/logo.png"
-            alt="ドキュパカ"
-            width={40}
-            height={40}
-            className="flex-shrink-0 rounded-lg bg-white/10 p-1"
-          />
-          {!isCollapsed && (
-            <span className="ml-2 text-xl font-semibold text-white whitespace-nowrap">
-              ドキュパカ！
-            </span>
-          )}
+        {/* ロゴエリア + 折りたたみボタン */}
+        <div className={`p-4 flex items-center ${isCollapsed ? 'flex-col gap-2' : 'justify-between'}`}>
+          <div className={`flex items-center ${isCollapsed ? 'justify-center' : ''}`}>
+            <Image
+              src="/logo.png"
+              alt="ドキュパカ"
+              width={40}
+              height={40}
+              className="flex-shrink-0 rounded-lg bg-white/10 p-1"
+            />
+            {!isCollapsed && (
+              <span className="ml-2 text-xl font-semibold text-white whitespace-nowrap">
+                ドキュパカ！
+              </span>
+            )}
+          </div>
+          <button
+            onClick={toggleSidebar}
+            className="flex items-center justify-center rounded p-1.5 text-white/70 hover:bg-green-700 hover:text-white transition-colors"
+            title={isCollapsed ? 'メニューを展開' : 'メニューを折りたたむ'}
+          >
+            {isCollapsed ? (
+              <ChevronRight className="h-5 w-5" />
+            ) : (
+              <ChevronLeft className="h-5 w-5" />
+            )}
+          </button>
         </div>
-
-        {/* 折りたたみボタン */}
-        <button
-          onClick={toggleSidebar}
-          className="mx-2 mb-2 flex items-center justify-center rounded p-2 text-white/70 hover:bg-green-700 hover:text-white transition-colors"
-          title={isCollapsed ? 'メニューを展開' : 'メニューを折りたたむ'}
-        >
-          {isCollapsed ? (
-            <ChevronRight className="h-5 w-5" />
-          ) : (
-            <ChevronLeft className="h-5 w-5" />
-          )}
-        </button>
 
         {/* --- ナビゲーション --- */}
         <div className="flex-1 px-2 overflow-y-auto">
