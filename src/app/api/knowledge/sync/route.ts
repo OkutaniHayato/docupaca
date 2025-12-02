@@ -8,6 +8,9 @@ import {
   deleteDocument,
 } from '@/lib/gemini-file-search-store';
 import { uploadTextContent, deleteFile } from '@/lib/gemini-file-api';
+import { createRequestLogger, generateRequestId } from '@/lib/logger';
+import { AuthError, ValidationError, ForbiddenError, NotFoundError, SyncError, logError, toErrorResponse } from '@/lib/errors';
+import { alertManager } from '@/lib/alerts';
 
 /**
  * ナレッジ同期APIエンドポイント
@@ -21,14 +24,14 @@ import { uploadTextContent, deleteFile } from '@/lib/gemini-file-api';
  * - セマンティック検索（RAG）が可能
  */
 export async function POST(request: NextRequest) {
+  const requestId = generateRequestId();
+  const log = createRequestLogger({ requestId, category: 'sync' });
+
   try {
     // 認証チェック
     const authHeader = request.headers.get('authorization');
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      return NextResponse.json(
-        { success: false, error: '認証が必要です' },
-        { status: 401 }
-      );
+      throw new AuthError('認証が必要です');
     }
 
     const token = authHeader.substring(7);
@@ -37,24 +40,21 @@ export async function POST(request: NextRequest) {
       const decodedToken = await adminAuth().verifyIdToken(token);
       userId = decodedToken.uid;
     } catch {
-      return NextResponse.json(
-        { success: false, error: '無効な認証トークンです' },
-        { status: 401 }
-      );
+      throw new AuthError('無効な認証トークンです');
     }
+
+    log.setDefaultContext({ userId });
 
     // リクエストボディの検証
     const body = await request.json();
     const { orgId, forceResync = false } = body;
 
     if (!orgId) {
-      return NextResponse.json(
-        { success: false, error: 'orgId は必須です' },
-        { status: 400 }
-      );
+      throw new ValidationError('orgId は必須です', 'orgId');
     }
 
-    console.log(`ナレッジ同期開始: orgId=${orgId}, userId=${userId}, forceResync=${forceResync}`);
+    log.setDefaultContext({ userId, orgId });
+    log.info('ナレッジ同期開始', { forceResync });
 
     const db = adminDb();
     const startTime = Date.now();
@@ -62,24 +62,21 @@ export async function POST(request: NextRequest) {
     // 組織の確認
     const orgDoc = await db.collection('organizations').doc(orgId).get();
     if (!orgDoc.exists) {
-      return NextResponse.json(
-        { success: false, error: '組織が見つかりません' },
-        { status: 404 }
-      );
+      throw new NotFoundError('組織', orgId);
     }
 
     const orgData = orgDoc.data();
     if (orgData?.owner_id !== userId) {
-      return NextResponse.json(
-        { success: false, error: 'この組織の同期権限がありません' },
-        { status: 403 }
-      );
+      throw new ForbiddenError('この組織の同期権限がありません');
     }
 
+    // 監査ログ: 同期操作の開始
+    log.audit('knowledge_sync_started', { orgId, userId, forceResync });
+
     // 組織用の FileSearchStore を取得または作成
-    console.log('FileSearchStore を取得/作成中...');
+    log.debug('FileSearchStore を取得/作成中...');
     const store = await getOrCreateStoreForOrg(orgId, orgData?.name);
-    console.log(`FileSearchStore: ${store.name}`);
+    log.debug('FileSearchStore 取得完了', { storeName: store.name });
 
     // FileSearchStore IDをorganizationに保存
     if (!orgData?.fileSearchStoreId || orgData.fileSearchStoreId !== store.name) {
@@ -138,10 +135,10 @@ export async function POST(request: NextRequest) {
         if (docData.documentName) {
           try {
             await deleteDocument(docData.documentName, true);
-            console.log(`既存ドキュメント削除: ${docData.documentName}`);
+            log.debug('既存ドキュメント削除', { documentName: docData.documentName });
           } catch (deleteError) {
             // 削除エラーは無視（既に削除済みの可能性）
-            console.log(`既存ドキュメント削除スキップ: ${docData.documentName}`, deleteError);
+            log.debug('既存ドキュメント削除スキップ', { documentName: docData.documentName, error: deleteError });
           }
         }
 
@@ -154,16 +151,16 @@ export async function POST(request: NextRequest) {
           sourceType: docData.sourceType || 'manual',
         };
 
-        console.log(`File APIにアップロード中: ${displayName}`);
+        log.debug('File APIにアップロード中', { displayName, docId });
         const fileApiResult = await uploadTextContent(
           docData.content,
           displayName,
           docId
         );
-        console.log(`File APIアップロード完了: ${fileApiResult.name}`);
+        log.debug('File APIアップロード完了', { fileName: fileApiResult.name });
 
         // Step 2: File Search Store にインポート
-        console.log(`FileSearchStoreにインポート中: ${fileApiResult.name} → ${store.name}`);
+        log.debug('FileSearchStoreにインポート中', { fileName: fileApiResult.name, storeName: store.name });
         const importResult = await importFileToStore(
           store.name,
           fileApiResult.name,
@@ -171,19 +168,19 @@ export async function POST(request: NextRequest) {
         );
 
         // インポート完了を待機
-        console.log(`インポート待機中: ${importResult.name}`);
+        log.debug('インポート待機中', { operationName: importResult.name });
         const completedOp = await waitForUpload(importResult.name, 60000);
 
         // デバッグ: Operation レスポンス全体をログ
-        console.log('Operation完了レスポンス:', JSON.stringify(completedOp, null, 2));
+        log.debug('Operation完了レスポンス', { response: completedOp });
 
         // Step 3: File API の一時ファイルを削除（オプション：48時間後に自動削除されるが、すぐ削除してもOK）
         try {
           await deleteFile(fileApiResult.name);
-          console.log(`File API一時ファイル削除: ${fileApiResult.name}`);
+          log.debug('File API一時ファイル削除', { fileName: fileApiResult.name });
         } catch (deleteError) {
           // 削除エラーは無視（ファイルは48時間後に自動削除される）
-          console.log(`File API一時ファイル削除スキップ: ${fileApiResult.name}`, deleteError);
+          log.debug('File API一時ファイル削除スキップ', { fileName: fileApiResult.name, error: deleteError });
         }
 
         // importFile の場合、responseにdocumentNameがある
@@ -196,7 +193,7 @@ export async function POST(request: NextRequest) {
           documentName = `fileSearchStores/${responseData.parent}/documents/${responseData.documentName}`;
         }
 
-        console.log(`アップロード完了: ${documentName}`);
+        log.info('アップロード完了', { docId, documentName });
 
         // 成功ステータスに更新
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -220,7 +217,8 @@ export async function POST(request: NextRequest) {
         stats.syncedDocs++;
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-        console.error(`同期エラー (${docId}):`, errorMessage);
+        const retryCount = (docData.syncRetryCount || 0) + 1;
+        log.error(`同期エラー`, error as Error, { docId, retryCount });
         failedDocs.push({ docId, error: errorMessage });
         stats.failedDocs++;
 
@@ -230,6 +228,11 @@ export async function POST(request: NextRequest) {
           syncError: errorMessage,
           syncRetryCount: FieldValue.increment(1),
         });
+
+        // アラート送信（リトライ回数が多い場合）
+        if (retryCount >= 2) {
+          await alertManager.syncFailed(orgId, docId, error as Error, retryCount);
+        }
       }
     }
 
@@ -245,9 +248,22 @@ export async function POST(request: NextRequest) {
       syncedDocIds,
       failedDocs,
       fileSearchStoreName: store.name,
+      requestId,
     });
 
-    console.log(`ナレッジ同期完了: ${stats.syncedDocs}件成功, ${stats.failedDocs}件失敗, ${durationMs}ms`);
+    // 監査ログ: 同期完了
+    log.audit('knowledge_sync_completed', {
+      orgId,
+      userId,
+      stats,
+      durationMs,
+    });
+
+    log.info('ナレッジ同期完了', {
+      syncedDocs: stats.syncedDocs,
+      failedDocs: stats.failedDocs,
+      durationMs,
+    });
 
     return NextResponse.json({
       success: true,
@@ -257,14 +273,17 @@ export async function POST(request: NextRequest) {
         syncedDocIds,
         failedDocs,
         fileSearchStoreName: store.name,
+        requestId,
       },
     });
   } catch (error) {
-    console.error('ナレッジ同期エラー:', error);
-    const errorMessage = error instanceof Error ? error.message : '同期に失敗しました';
+    // エラーログと正規化
+    const appError = logError(error, { category: 'sync' });
+
+    // AuthError, ValidationError, NotFoundError, ForbiddenError の場合は適切なステータスコードを返す
     return NextResponse.json(
-      { success: false, error: errorMessage },
-      { status: 500 }
+      toErrorResponse(appError),
+      { status: appError.statusCode }
     );
   }
 }
