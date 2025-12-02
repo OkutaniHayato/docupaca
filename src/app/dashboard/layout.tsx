@@ -22,7 +22,7 @@ function DashboardContent({ children }: { children: React.ReactNode }) {
         {/* ロゴエリア */}
         <div className={`p-4 flex items-center ${isCollapsed ? 'justify-center' : ''}`}>
           <Image
-            src="/logo.svg"
+            src="/logo.png"
             alt="ドキュパカ"
             width={40}
             height={40}
