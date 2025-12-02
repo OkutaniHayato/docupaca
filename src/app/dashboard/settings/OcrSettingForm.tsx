@@ -13,7 +13,8 @@ import {
   Plus,
   Trash2,
   BookOpen,
-  Check
+  Check,
+  X
 } from 'lucide-react';
 import { ExtractionField, Organization, OrgLearningDoc } from '@/types/ocr';
 import { useAuth } from '@/context/AuthContext';
