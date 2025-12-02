@@ -294,7 +294,7 @@ export default function OcrSettingForm({
   const [tempChildName, setTempChildName] = useState('');
   const [tempChildInstruction, setTempChildInstruction] = useState('');
 
-  const [layout, setLayout] = useState<'form-left' | 'form-right'>('form-left');
+  const [layout, setLayout] = useState<'form-left' | 'form-right'>('form-right');
   const [uploadedFile, setUploadedFile] = useState<File | null>(null);
   const [imagePreviewUrl, setImagePreviewUrl] = useState<string | null>(null);
 
