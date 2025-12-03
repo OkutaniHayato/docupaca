@@ -297,6 +297,7 @@ export default function OcrSettingForm({
   const [layout, setLayout] = useState<'form-left' | 'form-right'>('form-right');
   const [uploadedFile, setUploadedFile] = useState<File | null>(null);
   const [imagePreviewUrl, setImagePreviewUrl] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<'basic' | 'extraction'>('basic');
 
   const [expandedFields, setExpandedFields] = useState<Set<string>>(new Set());
 
@@ -546,10 +547,39 @@ export default function OcrSettingForm({
   // --- メインフォーム（UI） ---
   const FormContent = (
     <form onSubmit={handleSubmit} className="space-y-6">
-      {/* (フォームの中身は変更なし) */}
-      {/* ... */}
-            {/* --- 1. 基本設定エリア --- */}
-      <div className="p-6 bg-white border border-gray-200 rounded-lg shadow-sm">
+      {/* タブナビゲーション */}
+      <div className="border-b border-gray-200">
+        <nav className="-mb-px flex space-x-8" aria-label="Tabs">
+          <button
+            type="button"
+            onClick={() => setActiveTab('basic')}
+            className={`whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm ${
+              activeTab === 'basic'
+                ? 'border-green-500 text-green-600'
+                : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+            }`}
+          >
+            基本設定
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveTab('extraction')}
+            className={`whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm ${
+              activeTab === 'extraction'
+                ? 'border-green-500 text-green-600'
+                : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+            }`}
+          >
+            抽出設定
+          </button>
+        </nav>
+      </div>
+
+      {/* === 基本設定タブ === */}
+      {activeTab === 'basic' && (
+        <>
+          {/* --- 1. 基本設定エリア --- */}
+          <div className="p-6 bg-white border border-gray-200 rounded-lg shadow-sm">
          <div>
           <label htmlFor="name" className="block text-sm font-medium text-gray-700">
             設定名 (例：「請求書Aパターン」)
@@ -827,8 +857,13 @@ export default function OcrSettingForm({
           </p>
         </div>
       </div>
+        </>
+      )}
 
-      {/* --- 2. 抽出指示 (AI) エリア --- */}
+      {/* === 抽出設定タブ === */}
+      {activeTab === 'extraction' && (
+        <>
+          {/* --- 2. 抽出指示 (AI) エリア --- */}
       <div className="p-6 bg-white border border-gray-200 rounded-lg shadow-sm">
         <div className="flex justify-between items-center">
           <label htmlFor="prompt_text" className="block text-sm font-medium text-gray-700">
@@ -1086,7 +1121,9 @@ export default function OcrSettingForm({
           </div>
         </div>
       </div>
-      
+        </>
+      )}
+
       {/* --- 4. 保存/キャンセルボタン --- */}
       <div className="flex justify-end space-x-4">
         <Link
