@@ -1318,113 +1318,157 @@ export default function HistoryDetailPage() {
               {saveError}
             </div>
           )}
-          <div className="rounded-lg border border-gray-200 bg-white shadow-sm">
-            {Object.keys(history.extracted_data).length === 0 ? (
-              <div className="p-6 text-center text-gray-500">
-                {history.status === 'processing' && (
-                  <p>OCR処理中です。しばらくお待ちください。</p>
-                )}
-                {history.status === 'failed' && (
-                  <p className="text-red-600">OCR処理が失敗しました。</p>
-                )}
-                {history.status === 'completed' && (
-                  <p>抽出データがありません。</p>
-                )}
-              </div>
-            ) : (
-              <table className="w-full">
-                <thead>
-                  <tr className="border-b">
-                    <th className="p-3 text-left text-sm font-semibold text-gray-600">項目名</th>
-                    <th className="p-3 text-left text-sm font-semibold text-gray-600">タイプ</th>
-                    <th className="p-3 text-left text-sm font-semibold text-gray-600">信頼度</th>
-                    <th className="p-3 text-left text-sm font-semibold text-gray-600">
-                      {isEditMode ? '編集値' : (history.isHumanConfirmed ? '確定値' : 'AI抽出値')}
-                    </th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {Object.entries(history.extracted_data).map(([key, fieldData]) => {
-                    // 配列が直接来ている場合の処理
-                    if (Array.isArray(fieldData)) {
-                      const isExpanded = expandedArrays.has(key);
-                      const arrayData = fieldData as Array<{[childFieldName: string]: ExtractedValue}>;
+          {/* === 抽出データ表示エリア === */}
+          {Object.keys(history.extracted_data).length === 0 ? (
+            <div className="rounded-lg border border-gray-200 bg-white shadow-sm p-6 text-center text-gray-500">
+              {history.status === 'processing' && (
+                <p>OCR処理中です。しばらくお待ちください。</p>
+              )}
+              {history.status === 'failed' && (
+                <p className="text-red-600">OCR処理が失敗しました。</p>
+              )}
+              {history.status === 'completed' && (
+                <p>抽出データがありません。</p>
+              )}
+            </div>
+          ) : (
+            <>
+              {/* --- 単一値フィールドテーブル --- */}
+              {(() => {
+                const singleValueEntries = Object.entries(history.extracted_data).filter(
+                  ([, fieldData]) => isExtractedValue(fieldData)
+                );
+                if (singleValueEntries.length === 0) return null;
+                return (
+                  <div className="rounded-lg border border-gray-200 bg-white shadow-sm mb-6">
+                    <div className="p-4 border-b border-gray-200 bg-gray-50">
+                      <h3 className="text-sm font-semibold text-gray-700">基本項目</h3>
+                    </div>
+                    <table className="w-full">
+                      <thead>
+                        <tr className="border-b bg-gray-50">
+                          <th className="p-3 text-left text-sm font-semibold text-gray-600">項目名</th>
+                          <th className="p-3 text-left text-sm font-semibold text-gray-600">信頼度</th>
+                          <th className="p-3 text-left text-sm font-semibold text-gray-600">
+                            {isEditMode ? '編集値' : (history.isHumanConfirmed ? '確定値' : 'AI抽出値')}
+                          </th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {singleValueEntries.map(([key, fieldData]) => {
+                          const singleData = fieldData as ExtractedValue;
+                          const displayValue = history.humanConfirmedData && isExtractedValue(history.humanConfirmedData[key])
+                            ? (history.humanConfirmedData[key] as ExtractedValue).value
+                            : singleData.value;
+                          const confidenceStyle = getConfidenceStyle(singleData.confidence);
 
-                      return (
-                        <React.Fragment key={key}>
-                          {/* 親行 */}
-                          <tr className="border-b bg-green-50 hover:bg-green-100 cursor-pointer">
-                            <td className="p-3 text-sm font-medium text-gray-800">
-                              <div className="flex items-center gap-2" onClick={() => toggleArrayExpansion(key)}>
-                                {isExpanded ? (
-                                  <ChevronDown className="h-4 w-4 text-gray-600" />
+                          return (
+                            <tr
+                              key={key}
+                              className={`border-b hover:bg-blue-50 cursor-pointer transition-colors ${
+                                selectedField === key ? 'bg-blue-100' : ''
+                              } ${confidenceStyle.bgColor}`}
+                              onClick={() => setSelectedField(key)}
+                            >
+                              <td className="p-3 text-sm font-medium text-gray-800">{key}</td>
+                              <td className="p-3">
+                                <ConfidenceBadge confidence={singleData.confidence} />
+                              </td>
+                              <td className="p-3 text-sm text-gray-600 font-mono">
+                                {isEditMode ? (
+                                  <input
+                                    type="text"
+                                    value={(editedData && isExtractedValue(editedData[key])) ? (editedData[key] as ExtractedValue).value : displayValue}
+                                    onChange={(e) => {
+                                      if (!editedData) return;
+                                      const newData = { ...editedData };
+                                      if (isExtractedValue(newData[key])) {
+                                        (newData[key] as ExtractedValue).value = e.target.value;
+                                      } else {
+                                        newData[key] = { ...singleData, value: e.target.value };
+                                      }
+                                      setEditedData(newData);
+                                    }}
+                                    className="w-full px-2 py-1 border border-gray-300 rounded text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                  />
                                 ) : (
-                                  <ChevronRight className="h-4 w-4 text-gray-600" />
+                                  displayValue
                                 )}
-                                <span>{key}</span>
-                              </div>
-                            </td>
-                            <td className="p-3 text-sm text-gray-500">
-                              <span className="inline-flex items-center rounded-full px-2 py-1 text-xs font-medium bg-green-100 text-green-800">
-                                配列 ({arrayData.length}件)
-                              </span>
-                            </td>
-                            <td className="p-3 text-sm text-gray-500">-</td>
-                            <td className="p-3 text-sm text-gray-500 italic">
-                              {isExpanded ? '展開中' : 'クリックで展開'}
-                            </td>
-                          </tr>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                );
+              })()}
 
-                          {/* 子行（展開時） */}
-                          {isExpanded && arrayData.map((item, index) => (
-                            <React.Fragment key={`${key}-${index}`}>
-                              {/* 配列項目のヘッダー行 */}
-                              <tr className="border-b bg-gray-100">
-                                <td colSpan={4} className="p-2 pl-8 text-xs font-semibold text-gray-700">
-                                  {key}[{index}]
-                                </td>
-                              </tr>
+              {/* --- 配列フィールド（明細表形式） --- */}
+              {Object.entries(history.extracted_data).map(([key, fieldData]) => {
+                // 直接配列の場合
+                if (Array.isArray(fieldData)) {
+                  const arrayData = fieldData as Array<{[childFieldName: string]: ExtractedValue}>;
+                  if (arrayData.length === 0) return null;
 
-                              {/* 配列項目の子フィールド */}
-                              {Object.entries(item).map(([childKey, childValue]) => {
-                                if (!childValue) return null; // Skip null values
-                                const fullKey = `${key}[${index}].${childKey}`;
-                                const childConfidenceStyle = getConfidenceStyle(childValue.confidence);
+                  // 子フィールドのキーを取得（最初のアイテムから）
+                  const childKeys = Object.keys(arrayData[0] || {});
 
-                                // 人間確定データから子の値を取得（直接配列の場合）
-                                const getHumanConfirmedChildValueDirect = () => {
-                                  if (!history.humanConfirmedData) return null;
-                                  const parentData = history.humanConfirmedData[key];
-                                  if (!Array.isArray(parentData)) return null;
-                                  const itemData = (parentData as Array<{[k: string]: ExtractedValue}>)[index];
-                                  if (!itemData) return null;
-                                  return itemData[childKey]?.value;
-                                };
-                                const displayChildValue = getHumanConfirmedChildValueDirect() || childValue.value;
+                  return (
+                    <div key={key} className="rounded-lg border border-gray-200 bg-white shadow-sm mb-6">
+                      <div className="p-4 border-b border-gray-200 bg-green-50">
+                        <div className="flex items-center justify-between">
+                          <h3 className="text-sm font-semibold text-gray-700 flex items-center gap-2">
+                            <span className="inline-flex items-center rounded-full px-2 py-1 text-xs font-medium bg-green-100 text-green-800">
+                              明細
+                            </span>
+                            {key}
+                            <span className="text-gray-500 font-normal">({arrayData.length}件)</span>
+                          </h3>
+                        </div>
+                      </div>
+                      <div className="overflow-x-auto">
+                        <table className="w-full">
+                          <thead>
+                            <tr className="border-b bg-gray-50">
+                              <th className="p-3 text-center text-sm font-semibold text-gray-600 w-12">#</th>
+                              {childKeys.map((childKey) => (
+                                <th key={childKey} className="p-3 text-left text-sm font-semibold text-gray-600 min-w-[120px]">
+                                  {childKey}
+                                </th>
+                              ))}
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {arrayData.map((item, index) => (
+                              <tr key={`${key}-${index}`} className="border-b hover:bg-blue-50">
+                                <td className="p-3 text-center text-sm font-medium text-gray-500">{index + 1}</td>
+                                {childKeys.map((childKey) => {
+                                  const childValue = item[childKey];
+                                  if (!childValue) return <td key={childKey} className="p-3 text-sm text-gray-400">-</td>;
 
-                                return (
-                                  <tr
-                                    key={fullKey}
-                                    className={`border-b hover:bg-blue-50 cursor-pointer transition-colors ${
-                                      selectedField === fullKey ? 'bg-blue-100' : childConfidenceStyle.bgColor
-                                    }`}
-                                    onClick={() => setSelectedField(fullKey)}
-                                  >
-                                    <td className="p-3 pl-12 text-sm text-gray-700">
-                                      <span className="flex items-center gap-2">
-                                        <span className="text-gray-400">└</span>
-                                        {childKey}
-                                      </span>
-                                    </td>
-                                    <td className="p-3 text-sm text-gray-500">
-                                      <span className="inline-flex items-center rounded-full px-2 py-1 text-xs font-medium bg-blue-100 text-blue-800">
-                                        子フィールド
-                                      </span>
-                                    </td>
-                                    <td className="p-3">
-                                      <ConfidenceBadge confidence={childValue.confidence} />
-                                    </td>
-                                    <td className="p-3 text-sm text-gray-600 font-mono">
+                                  const fullKey = `${key}[${index}].${childKey}`;
+                                  const childConfidenceStyle = getConfidenceStyle(childValue.confidence);
+
+                                  // 人間確定データから子の値を取得
+                                  const getHumanConfirmedChildValueDirect = () => {
+                                    if (!history.humanConfirmedData) return null;
+                                    const parentData = history.humanConfirmedData[key];
+                                    if (!Array.isArray(parentData)) return null;
+                                    const itemData = (parentData as Array<{[k: string]: ExtractedValue}>)[index];
+                                    if (!itemData) return null;
+                                    return itemData[childKey]?.value;
+                                  };
+                                  const displayChildValue = getHumanConfirmedChildValueDirect() || childValue.value;
+
+                                  return (
+                                    <td
+                                      key={childKey}
+                                      className={`p-3 text-sm font-mono cursor-pointer ${
+                                        selectedField === fullKey ? 'bg-blue-100' : childConfidenceStyle.bgColor
+                                      }`}
+                                      onClick={() => setSelectedField(fullKey)}
+                                    >
                                       {isEditMode ? (
                                         <input
                                           type="text"
@@ -1456,141 +1500,80 @@ export default function HistoryDetailPage() {
                                         displayChildValue
                                       )}
                                     </td>
-                                  </tr>
-                                );
-                              })}
-                            </React.Fragment>
-                          ))}
-                        </React.Fragment>
-                      );
-                    }
-
-                    if (isExtractedValue(fieldData)) {
-                      // 単一値フィールド
-                      const displayValue = history.humanConfirmedData && isExtractedValue(history.humanConfirmedData[key])
-                        ? (history.humanConfirmedData[key] as ExtractedValue).value
-                        : fieldData.value;
-                      const confidenceStyle = getConfidenceStyle(fieldData.confidence);
-
-                      return (
-                        <tr
-                          key={key}
-                          className={`border-b hover:bg-blue-50 cursor-pointer transition-colors ${
-                            selectedField === key ? 'bg-blue-100' : ''
-                          } ${confidenceStyle.bgColor}`}
-                          onClick={() => setSelectedField(key)}
-                        >
-                          <td className="p-3 text-sm font-medium text-gray-800">{key}</td>
-                          <td className="p-3 text-sm text-gray-500">
-                            <span className="inline-flex items-center rounded-full px-2 py-1 text-xs font-medium bg-gray-100 text-gray-800">
-                              単一値
-                            </span>
-                          </td>
-                          <td className="p-3">
-                            <ConfidenceBadge confidence={fieldData.confidence} />
-                          </td>
-                          <td className="p-3 text-sm text-gray-600 font-mono">
-                            {isEditMode ? (
-                              <input
-                                type="text"
-                                value={(editedData && isExtractedValue(editedData[key])) ? (editedData[key] as ExtractedValue).value : displayValue}
-                                onChange={(e) => {
-                                  if (!editedData) return;
-                                  const newData = { ...editedData };
-                                  if (isExtractedValue(newData[key])) {
-                                    (newData[key] as ExtractedValue).value = e.target.value;
-                                  } else {
-                                    newData[key] = { ...fieldData, value: e.target.value };
-                                  }
-                                  setEditedData(newData);
-                                }}
-                                className="w-full px-2 py-1 border border-gray-300 rounded text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                              />
-                            ) : (
-                              displayValue
-                            )}
-                          </td>
-                        </tr>
-                      );
-                    } else if (isExtractedArrayData(fieldData)) {
-                      // 配列フィールド
-                      const isExpanded = expandedArrays.has(key);
-
-                      return (
-                        <React.Fragment key={key}>
-                          {/* 親行 */}
-                          <tr className="border-b bg-green-50 hover:bg-green-100 cursor-pointer">
-                            <td className="p-3 text-sm font-medium text-gray-800">
-                              <div className="flex items-center gap-2" onClick={() => toggleArrayExpansion(key)}>
-                                {isExpanded ? (
-                                  <ChevronDown className="h-4 w-4 text-gray-600" />
-                                ) : (
-                                  <ChevronRight className="h-4 w-4 text-gray-600" />
-                                )}
-                                <span>{key}</span>
-                              </div>
-                            </td>
-                            <td className="p-3 text-sm text-gray-500">
-                              <span className="inline-flex items-center rounded-full px-2 py-1 text-xs font-medium bg-green-100 text-green-800">
-                                配列 ({fieldData.items.length}件)
-                              </span>
-                            </td>
-                            <td className="p-3 text-sm text-gray-500">-</td>
-                            <td className="p-3 text-sm text-gray-500 italic">
-                              {isExpanded ? '展開中' : 'クリックで展開'}
-                            </td>
-                          </tr>
-
-                          {/* 子行（展開時） */}
-                          {isExpanded && fieldData.items.map((item, index) => (
-                            <React.Fragment key={`${key}-${index}`}>
-                              {/* 配列項目のヘッダー行 */}
-                              <tr className="border-b bg-gray-100">
-                                <td colSpan={4} className="p-2 pl-8 text-xs font-semibold text-gray-700">
-                                  {key}[{index}]
-                                </td>
+                                  );
+                                })}
                               </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  );
+                }
 
-                              {/* 配列項目の子フィールド */}
-                              {Object.entries(item).map(([childKey, childValue]) => {
-                                if (!childValue) return null; // Skip null values
-                                const fullKey = `${key}[${index}].${childKey}`;
-                                const childConfidenceStyle = getConfidenceStyle(childValue.confidence);
+                // ExtractedArrayData（items構造）の場合
+                if (isExtractedArrayData(fieldData)) {
+                  const arrayData = fieldData.items;
+                  if (arrayData.length === 0) return null;
 
-                                // 人間確定データから子の値を取得
-                                const getHumanConfirmedChildValue = () => {
-                                  if (!history.humanConfirmedData) return null;
-                                  const parentData = history.humanConfirmedData[key];
-                                  if (!isExtractedArrayData(parentData)) return null;
-                                  const itemData = parentData.items[index];
-                                  if (!itemData) return null;
-                                  return itemData[childKey]?.value;
-                                };
-                                const displayChildValue = getHumanConfirmedChildValue() || childValue.value;
+                  // 子フィールドのキーを取得（最初のアイテムから）
+                  const childKeys = Object.keys(arrayData[0] || {});
 
-                                return (
-                                  <tr
-                                    key={fullKey}
-                                    className={`border-b hover:bg-blue-50 cursor-pointer transition-colors ${
-                                      selectedField === fullKey ? 'bg-blue-100' : childConfidenceStyle.bgColor
-                                    }`}
-                                    onClick={() => setSelectedField(fullKey)}
-                                  >
-                                    <td className="p-3 pl-12 text-sm text-gray-700">
-                                      <span className="flex items-center gap-2">
-                                        <span className="text-gray-400">└</span>
-                                        {childKey}
-                                      </span>
-                                    </td>
-                                    <td className="p-3 text-sm text-gray-500">
-                                      <span className="inline-flex items-center rounded-full px-2 py-1 text-xs font-medium bg-blue-100 text-blue-800">
-                                        子フィールド
-                                      </span>
-                                    </td>
-                                    <td className="p-3">
-                                      <ConfidenceBadge confidence={childValue.confidence} />
-                                    </td>
-                                    <td className="p-3 text-sm text-gray-600 font-mono">
+                  return (
+                    <div key={key} className="rounded-lg border border-gray-200 bg-white shadow-sm mb-6">
+                      <div className="p-4 border-b border-gray-200 bg-green-50">
+                        <div className="flex items-center justify-between">
+                          <h3 className="text-sm font-semibold text-gray-700 flex items-center gap-2">
+                            <span className="inline-flex items-center rounded-full px-2 py-1 text-xs font-medium bg-green-100 text-green-800">
+                              明細
+                            </span>
+                            {key}
+                            <span className="text-gray-500 font-normal">({arrayData.length}件)</span>
+                          </h3>
+                        </div>
+                      </div>
+                      <div className="overflow-x-auto">
+                        <table className="w-full">
+                          <thead>
+                            <tr className="border-b bg-gray-50">
+                              <th className="p-3 text-center text-sm font-semibold text-gray-600 w-12">#</th>
+                              {childKeys.map((childKey) => (
+                                <th key={childKey} className="p-3 text-left text-sm font-semibold text-gray-600 min-w-[120px]">
+                                  {childKey}
+                                </th>
+                              ))}
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {arrayData.map((item, index) => (
+                              <tr key={`${key}-${index}`} className="border-b hover:bg-blue-50">
+                                <td className="p-3 text-center text-sm font-medium text-gray-500">{index + 1}</td>
+                                {childKeys.map((childKey) => {
+                                  const childValue = item[childKey];
+                                  if (!childValue) return <td key={childKey} className="p-3 text-sm text-gray-400">-</td>;
+
+                                  const fullKey = `${key}[${index}].${childKey}`;
+                                  const childConfidenceStyle = getConfidenceStyle(childValue.confidence);
+
+                                  // 人間確定データから子の値を取得
+                                  const getHumanConfirmedChildValue = () => {
+                                    if (!history.humanConfirmedData) return null;
+                                    const parentData = history.humanConfirmedData[key];
+                                    if (!isExtractedArrayData(parentData)) return null;
+                                    const itemData = parentData.items[index];
+                                    if (!itemData) return null;
+                                    return itemData[childKey]?.value;
+                                  };
+                                  const displayChildValue = getHumanConfirmedChildValue() || childValue.value;
+
+                                  return (
+                                    <td
+                                      key={childKey}
+                                      className={`p-3 text-sm font-mono cursor-pointer ${
+                                        selectedField === fullKey ? 'bg-blue-100' : childConfidenceStyle.bgColor
+                                      }`}
+                                      onClick={() => setSelectedField(fullKey)}
+                                    >
                                       {isEditMode ? (
                                         <input
                                           type="text"
@@ -1618,21 +1601,21 @@ export default function HistoryDetailPage() {
                                         displayChildValue
                                       )}
                                     </td>
-                                  </tr>
-                                );
-                              })}
-                            </React.Fragment>
-                          ))}
-                        </React.Fragment>
-                      );
-                    }
+                                  );
+                                })}
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  );
+                }
 
-                    return null;
-                  })}
-                </tbody>
-              </table>
-            )}
-          </div>
+                return null;
+              })}
+            </>
+          )}
 
           {/* --- OCR設定情報 --- */}
           {history.setting && (
