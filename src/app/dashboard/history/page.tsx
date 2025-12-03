@@ -15,7 +15,7 @@ import {
 } from 'firebase/firestore';
 import { ref, uploadBytes } from 'firebase/storage';
 import { getFunctions, httpsCallable } from 'firebase/functions';
-import { Upload, X, CheckCircle, Clock, Building2, FileText } from 'lucide-react';
+import { Upload, X, CheckCircle, Clock, Building2, FileText, Filter } from 'lucide-react';
 import { Organization, OcrSetting } from '@/types/ocr';
 
 // OCR履歴アイテムの型定義
@@ -26,6 +26,8 @@ interface OcrHistoryItem {
   original_file_path: string;
   executed_at: Timestamp;
   settingName?: string;
+  organizationId?: string;
+  organizationName?: string;
   isHumanConfirmed?: boolean;
 }
 
@@ -45,6 +47,10 @@ export default function HistoryPage() {
   const [isLoading, setIsLoading] = useState(true);
   const { currentUser } = useAuth();
 
+  // フィルター用のステート
+  const [filterOrganizationId, setFilterOrganizationId] = useState<string>('');
+  const [filterSettingId, setFilterSettingId] = useState<string>('');
+
   // 新規実行モーダル用のステート
   const [isExecuteModalOpen, setIsExecuteModalOpen] = useState(false);
   const [organizations, setOrganizations] = useState<OrganizationWithId[]>([]);
@@ -60,16 +66,28 @@ export default function HistoryPage() {
     if (!currentUser) return;
 
     try {
-      // --- 1. ユーザーが所有する OCR設定 の ID をすべて取得 ---
+      // 組織一覧を取得
+      const orgsRef = collection(db, 'organizations');
+      const orgsQuery = query(orgsRef, where('owner_id', '==', currentUser.uid));
+      const orgsSnapshot = await getDocs(orgsQuery);
+      const orgsMap = new Map<string, string>();
+      orgsSnapshot.docs.forEach(doc => {
+        orgsMap.set(doc.id, doc.data().name);
+      });
+
+      // ユーザーが所有する OCR設定 の ID をすべて取得
       const settingsRef = collection(db, "ocr_settings");
       const settingsQuery = query(settingsRef, where("owner_id", "==", currentUser.uid));
       const settingsSnapshot = await getDocs(settingsQuery);
 
-      // 設定IDと設定名のマップを作成
-      const settingsMap = new Map<string, string>();
+      // 設定IDと設定名・組織IDのマップを作成
+      const settingsMap = new Map<string, { name: string; organizationId?: string }>();
       settingsSnapshot.docs.forEach(doc => {
         const data = doc.data();
-        settingsMap.set(doc.id, data.displayName || data.name || doc.id);
+        settingsMap.set(doc.id, {
+          name: data.displayName || data.name || doc.id,
+          organizationId: data.organization_id,
+        });
       });
 
       const settingIds = Array.from(settingsMap.keys());
@@ -79,7 +97,7 @@ export default function HistoryPage() {
         return;
       }
 
-      // --- 2. 取得した ID 配列を使って、履歴 を 'in' で検索 ---
+      // 履歴を検索
       const historyRef = collection(db, "ocr_history");
       const historyQuery = query(historyRef, where("setting_id", "in", settingIds));
 
@@ -88,13 +106,16 @@ export default function HistoryPage() {
       const histories: OcrHistoryItem[] = [];
       historySnapshot.forEach((doc) => {
         const data = doc.data();
+        const settingInfo = settingsMap.get(data.setting_id);
         histories.push({
           id: doc.id,
           setting_id: data.setting_id,
           status: data.status,
           original_file_path: data.original_file_path,
           executed_at: data.executed_at,
-          settingName: settingsMap.get(data.setting_id) || data.setting_id,
+          settingName: settingInfo?.name || data.setting_id,
+          organizationId: settingInfo?.organizationId,
+          organizationName: settingInfo?.organizationId ? orgsMap.get(settingInfo.organizationId) : undefined,
           isHumanConfirmed: data.isHumanConfirmed || false,
         });
       });
@@ -169,7 +190,30 @@ export default function HistoryPage() {
     return () => unsubscribe();
   }, [currentUser]);
 
-  // 選択した組織に紐づくテンプレートをフィルタ
+  // フィルタリングされた履歴リスト
+  const filteredHistoryList = useMemo(() => {
+    return historyList.filter(item => {
+      // 組織フィルター
+      if (filterOrganizationId && item.organizationId !== filterOrganizationId) {
+        return false;
+      }
+      // 帳票名フィルター
+      if (filterSettingId && item.setting_id !== filterSettingId) {
+        return false;
+      }
+      return true;
+    });
+  }, [historyList, filterOrganizationId, filterSettingId]);
+
+  // フィルター用の組織でフィルタされた帳票リスト
+  const filterableSettings = useMemo(() => {
+    if (!filterOrganizationId) {
+      return ocrSettings;
+    }
+    return ocrSettings.filter(s => s.organization_id === filterOrganizationId);
+  }, [filterOrganizationId, ocrSettings]);
+
+  // 選択した組織に紐づくテンプレートをフィルタ（新規実行用）
   const filteredSettings = useMemo(() => {
     if (!selectedOrganizationId) {
       // 「未分類」が選択された場合
@@ -189,6 +233,11 @@ export default function HistoryPage() {
   useEffect(() => {
     setSelectedSettingId('');
   }, [selectedOrganizationId]);
+
+  // フィルター用：組織選択時に帳票フィルターをリセット
+  useEffect(() => {
+    setFilterSettingId('');
+  }, [filterOrganizationId]);
 
   // ファイル選択ハンドラー
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -274,6 +323,12 @@ export default function HistoryPage() {
     }
   };
 
+  // フィルターをクリア
+  const handleClearFilters = () => {
+    setFilterOrganizationId('');
+    setFilterSettingId('');
+  };
+
   // ステータスチップの表示
   const getStatusChip = (status: string) => {
     switch (status) {
@@ -319,6 +374,68 @@ export default function HistoryPage() {
           <Upload className="h-4 w-4" />
           新規実行
         </button>
+      </div>
+
+      {/* フィルターエリア */}
+      <div className="mb-4 p-4 bg-white rounded-lg border border-gray-200 shadow-sm">
+        <div className="flex items-center gap-2 mb-3">
+          <Filter className="h-4 w-4 text-gray-600" />
+          <span className="text-sm font-semibold text-gray-700">フィルター</span>
+          {(filterOrganizationId || filterSettingId) && (
+            <button
+              onClick={handleClearFilters}
+              className="ml-auto text-xs text-gray-500 hover:text-gray-700 underline"
+            >
+              クリア
+            </button>
+          )}
+        </div>
+        <div className="flex flex-wrap gap-4">
+          {/* 組織フィルター */}
+          <div className="flex-1 min-w-[200px]">
+            <label className="block text-xs font-medium text-gray-600 mb-1">
+              <Building2 className="h-3 w-3 inline-block mr-1" />
+              組織（会社名）
+            </label>
+            <select
+              value={filterOrganizationId}
+              onChange={(e) => setFilterOrganizationId(e.target.value)}
+              className="w-full rounded-md border border-gray-300 px-3 py-1.5 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-green-500"
+            >
+              <option value="">すべての組織</option>
+              {organizations.map((org) => (
+                <option key={org.id} value={org.id}>
+                  {org.name}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* 帳票名フィルター */}
+          <div className="flex-1 min-w-[200px]">
+            <label className="block text-xs font-medium text-gray-600 mb-1">
+              <FileText className="h-3 w-3 inline-block mr-1" />
+              帳票名（OCR設定）
+            </label>
+            <select
+              value={filterSettingId}
+              onChange={(e) => setFilterSettingId(e.target.value)}
+              className="w-full rounded-md border border-gray-300 px-3 py-1.5 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-green-500"
+            >
+              <option value="">すべての帳票</option>
+              {filterableSettings.map((setting) => (
+                <option key={setting.id} value={setting.id}>
+                  {setting.displayName || setting.name}
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
+        {(filterOrganizationId || filterSettingId) && (
+          <div className="mt-2 text-xs text-gray-500">
+            {filteredHistoryList.length} 件の結果
+          </div>
+        )}
       </div>
 
       {/* 新規実行モーダル */}
@@ -452,23 +569,26 @@ export default function HistoryPage() {
           <thead>
             <tr className="border-b">
               <th className="p-3 text-left text-sm font-semibold text-gray-600" style={{ width: '90px' }}>ステータス</th>
-              <th className="p-3 text-left text-sm font-semibold text-gray-600" style={{ width: '35%' }}>ファイル名</th>
+              <th className="p-3 text-left text-sm font-semibold text-gray-600" style={{ width: '18%' }}>組織名</th>
+              <th className="p-3 text-left text-sm font-semibold text-gray-600" style={{ width: '30%' }}>ファイル名</th>
               <th className="p-3 text-left text-sm font-semibold text-gray-600" style={{ width: '80px' }}>確定</th>
-              <th className="p-3 text-left text-sm font-semibold text-gray-600" style={{ width: '25%' }}>OCR設定名</th>
-              <th className="p-3 text-left text-sm font-semibold text-gray-600" style={{ width: '160px' }}>実行日時</th>
+              <th className="p-3 text-left text-sm font-semibold text-gray-600" style={{ width: '20%' }}>OCR設定名</th>
+              <th className="p-3 text-left text-sm font-semibold text-gray-600" style={{ width: '140px' }}>実行日時</th>
             </tr>
           </thead>
           <tbody>
             {isLoading ? (
               <tr>
-                <td colSpan={5} className="p-3 text-center text-gray-500">読み込み中...</td>
+                <td colSpan={6} className="p-3 text-center text-gray-500">読み込み中...</td>
               </tr>
-            ) : historyList.length === 0 ? (
+            ) : filteredHistoryList.length === 0 ? (
               <tr>
-                <td colSpan={5} className="p-3 text-center text-gray-500">実行履歴はありません。</td>
+                <td colSpan={6} className="p-3 text-center text-gray-500">
+                  {historyList.length === 0 ? '実行履歴はありません。' : 'フィルター条件に一致する履歴がありません。'}
+                </td>
               </tr>
             ) : (
-              historyList.map((item) => {
+              filteredHistoryList.map((item) => {
                 // ファイル名を取得（タイムスタンプ部分を除去）
                 const fullFileName = item.original_file_path.split('/').pop() || '';
                 // タイムスタンプ_ファイル名 形式の場合、タイムスタンプを除去
@@ -480,6 +600,11 @@ export default function HistoryPage() {
                 return (
                   <tr key={item.id} className="border-b hover:bg-gray-50">
                     <td className="p-3">{getStatusChip(item.status)}</td>
+                    <td className="p-3">
+                      <span className="text-sm text-gray-700 truncate block">
+                        {item.organizationName || '-'}
+                      </span>
+                    </td>
                     <td className="p-3">
                       <Link
                         href={`/dashboard/history/view/${item.id}`}
