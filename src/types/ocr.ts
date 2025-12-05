@@ -560,3 +560,107 @@ export interface LearningHistory {
     minOccurrenceCount: number;
   };
 }
+
+// ================================
+// カスタムDB機能の型定義
+// ================================
+
+/**
+ * カスタムDBのフィールドデータ型
+ */
+export type CustomFieldType = 'text' | 'number' | 'date' | 'currency';
+
+/**
+ * カスタムDBのフィールドカテゴリ
+ * - single: 単一項目（1レコードに1つの値）
+ * - detail: 明細項目（1レコードに複数行の値）
+ */
+export type CustomFieldCategory = 'single' | 'detail';
+
+/**
+ * カスタムDBのフィールド定義
+ */
+export interface CustomField {
+  /** フィールドID（UUID） */
+  id: string;
+
+  /** フィールド名（表示名） */
+  name: string;
+
+  /** データ型 */
+  type: CustomFieldType;
+
+  /** フィールドカテゴリ（単一/明細） */
+  category: CustomFieldCategory;
+
+  /** 必須項目かどうか */
+  required: boolean;
+
+  /** 表示順序 */
+  order: number;
+}
+
+/**
+ * カスタムDB定義（customDatabasesコレクション）
+ * 組織ごとに複数作成可能
+ */
+export interface CustomDatabase {
+  /** 組織ID（organizationsのドキュメントID） */
+  organizationId: string;
+
+  /** DB名 */
+  name: string;
+
+  /** 説明 */
+  description?: string;
+
+  /** フィールド定義配列 */
+  fields: CustomField[];
+
+  /** 所有者UID */
+  ownerId: string;
+
+  /** 作成日時 */
+  createdAt: FirebaseFirestore.Timestamp | Date;
+
+  /** 更新日時 */
+  updatedAt?: FirebaseFirestore.Timestamp | Date;
+}
+
+/**
+ * カスタムレコードの単一フィールド値
+ */
+export type CustomRecordSingleValue = string | number | null;
+
+/**
+ * カスタムレコードの明細行データ
+ * 明細フィールドIDをキーとする1行分のデータ
+ */
+export type CustomRecordDetailRow = { [fieldId: string]: string | number | null };
+
+/**
+ * カスタムレコード（customRecordsコレクション）
+ * 各DBに対してデータを登録
+ */
+export interface CustomRecord {
+  /** カスタムDBのドキュメントID */
+  databaseId: string;
+
+  /** 組織ID */
+  organizationId: string;
+
+  /** 単一フィールドデータ（フィールドIDをキーとする） */
+  singleData: { [fieldId: string]: CustomRecordSingleValue };
+
+  /** 明細データ（行の配列） */
+  detailRows: CustomRecordDetailRow[];
+
+  /** 所有者UID */
+  ownerId: string;
+
+  /** 作成日時 */
+  createdAt: FirebaseFirestore.Timestamp | Date;
+
+  /** 更新日時 */
+  updatedAt?: FirebaseFirestore.Timestamp | Date;
+}
