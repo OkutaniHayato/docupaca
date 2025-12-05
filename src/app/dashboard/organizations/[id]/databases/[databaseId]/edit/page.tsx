@@ -11,7 +11,7 @@ import {
   serverTimestamp,
 } from 'firebase/firestore';
 import { v4 as uuidv4 } from 'uuid';
-import { Organization, CustomDatabase, CustomField, CustomFieldType } from '@/types/ocr';
+import { Organization, CustomDatabase, CustomField, CustomFieldType, CustomFieldCategory } from '@/types/ocr';
 import {
   ArrowLeft,
   Plus,
@@ -37,6 +37,11 @@ const FIELD_TYPES: { value: CustomFieldType; label: string }[] = [
   { value: 'number', label: '数値' },
   { value: 'date', label: '日付' },
   { value: 'currency', label: '金額' },
+];
+
+const FIELD_CATEGORIES: { value: CustomFieldCategory; label: string }[] = [
+  { value: 'single', label: '単一' },
+  { value: 'detail', label: '明細' },
 ];
 
 export default function EditDatabasePage({
@@ -113,13 +118,14 @@ export default function EditDatabasePage({
   }, [currentUser, orgId, databaseId]);
 
   // フィールドを追加
-  const handleAddField = () => {
+  const handleAddField = (category: CustomFieldCategory = 'single') => {
     setFields([
       ...fields,
       {
         id: uuidv4(),
         name: '',
         type: 'text',
+        category,
         required: false,
         order: fields.length,
       },
@@ -321,23 +327,39 @@ export default function EditDatabasePage({
         {/* フィールド定義 */}
         <div className="bg-white rounded-lg border border-gray-200 p-6">
           <div className="flex items-center justify-between mb-4">
-            <h2 className="text-lg font-semibold text-gray-900">項目定義</h2>
-            <button
-              type="button"
-              onClick={handleAddField}
-              className="flex items-center gap-1 text-sm text-green-600 hover:text-green-800"
-            >
-              <Plus className="h-4 w-4" />
-              項目を追加
-            </button>
+            <div>
+              <h2 className="text-lg font-semibold text-gray-900">項目定義</h2>
+              <p className="text-sm text-gray-500 mt-1">
+                単一項目：請求書番号など1つの値 / 明細項目：商品リストなど複数行
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => handleAddField('single')}
+                className="flex items-center gap-1 text-sm text-green-600 hover:text-green-800 px-2 py-1 border border-green-600 rounded"
+              >
+                <Plus className="h-4 w-4" />
+                単一項目
+              </button>
+              <button
+                type="button"
+                onClick={() => handleAddField('detail')}
+                className="flex items-center gap-1 text-sm text-blue-600 hover:text-blue-800 px-2 py-1 border border-blue-600 rounded"
+              >
+                <Plus className="h-4 w-4" />
+                明細項目
+              </button>
+            </div>
           </div>
 
           <div className="space-y-3">
             {/* ヘッダー */}
             <div className="hidden md:grid md:grid-cols-12 gap-3 text-xs font-medium text-gray-500 uppercase tracking-wider px-2">
               <div className="col-span-1"></div>
-              <div className="col-span-4">項目名</div>
-              <div className="col-span-3">データ型</div>
+              <div className="col-span-2">種別</div>
+              <div className="col-span-3">項目名</div>
+              <div className="col-span-2">データ型</div>
               <div className="col-span-2">必須</div>
               <div className="col-span-2"></div>
             </div>
@@ -353,6 +375,8 @@ export default function EditDatabasePage({
                 className={`grid grid-cols-1 md:grid-cols-12 gap-3 items-center p-3 rounded-lg border ${
                   dragIndex === index
                     ? 'border-green-500 bg-green-50'
+                    : field.category === 'detail'
+                    ? 'border-blue-200 bg-blue-50'
                     : 'border-gray-200 bg-gray-50'
                 }`}
               >
@@ -361,8 +385,29 @@ export default function EditDatabasePage({
                   <GripVertical className="h-5 w-5 text-gray-400" />
                 </div>
 
+                {/* 種別 */}
+                <div className="col-span-1 md:col-span-2">
+                  <select
+                    value={field.category || 'single'}
+                    onChange={(e) =>
+                      handleUpdateField(index, 'category', e.target.value as CustomFieldCategory)
+                    }
+                    className={`w-full rounded-md border px-2 py-2 text-sm focus:ring-1 ${
+                      field.category === 'detail'
+                        ? 'border-blue-300 bg-blue-100 text-blue-800 focus:border-blue-500 focus:ring-blue-500'
+                        : 'border-gray-300 focus:border-green-500 focus:ring-green-500'
+                    }`}
+                  >
+                    {FIELD_CATEGORIES.map((cat) => (
+                      <option key={cat.value} value={cat.value}>
+                        {cat.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
                 {/* 項目名 */}
-                <div className="col-span-1 md:col-span-4">
+                <div className="col-span-1 md:col-span-3">
                   <input
                     type="text"
                     value={field.name}
@@ -373,13 +418,13 @@ export default function EditDatabasePage({
                 </div>
 
                 {/* データ型 */}
-                <div className="col-span-1 md:col-span-3">
+                <div className="col-span-1 md:col-span-2">
                   <select
                     value={field.type}
                     onChange={(e) =>
                       handleUpdateField(index, 'type', e.target.value as CustomFieldType)
                     }
-                    className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-green-500 focus:ring-1 focus:ring-green-500"
+                    className="w-full rounded-md border border-gray-300 px-2 py-2 text-sm focus:border-green-500 focus:ring-1 focus:ring-green-500"
                   >
                     {FIELD_TYPES.map((type) => (
                       <option key={type.value} value={type.value}>
@@ -418,14 +463,24 @@ export default function EditDatabasePage({
           </div>
 
           {/* フィールド追加ボタン（下部） */}
-          <button
-            type="button"
-            onClick={handleAddField}
-            className="mt-4 w-full flex items-center justify-center gap-2 p-3 border-2 border-dashed border-gray-300 rounded-lg text-gray-500 hover:border-green-500 hover:text-green-600 transition-colors"
-          >
-            <Plus className="h-5 w-5" />
-            項目を追加
-          </button>
+          <div className="mt-4 flex gap-2">
+            <button
+              type="button"
+              onClick={() => handleAddField('single')}
+              className="flex-1 flex items-center justify-center gap-2 p-3 border-2 border-dashed border-gray-300 rounded-lg text-gray-500 hover:border-green-500 hover:text-green-600 transition-colors"
+            >
+              <Plus className="h-5 w-5" />
+              単一項目を追加
+            </button>
+            <button
+              type="button"
+              onClick={() => handleAddField('detail')}
+              className="flex-1 flex items-center justify-center gap-2 p-3 border-2 border-dashed border-blue-300 rounded-lg text-blue-500 hover:border-blue-500 hover:text-blue-600 transition-colors"
+            >
+              <Plus className="h-5 w-5" />
+              明細項目を追加
+            </button>
+          </div>
         </div>
 
         {/* 送信ボタン */}

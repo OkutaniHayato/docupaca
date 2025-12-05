@@ -571,6 +571,13 @@ export interface LearningHistory {
 export type CustomFieldType = 'text' | 'number' | 'date' | 'currency';
 
 /**
+ * カスタムDBのフィールドカテゴリ
+ * - single: 単一項目（1レコードに1つの値）
+ * - detail: 明細項目（1レコードに複数行の値）
+ */
+export type CustomFieldCategory = 'single' | 'detail';
+
+/**
  * カスタムDBのフィールド定義
  */
 export interface CustomField {
@@ -582,6 +589,9 @@ export interface CustomField {
 
   /** データ型 */
   type: CustomFieldType;
+
+  /** フィールドカテゴリ（単一/明細） */
+  category: CustomFieldCategory;
 
   /** 必須項目かどうか */
   required: boolean;
@@ -618,6 +628,17 @@ export interface CustomDatabase {
 }
 
 /**
+ * カスタムレコードの単一フィールド値
+ */
+export type CustomRecordSingleValue = string | number | null;
+
+/**
+ * カスタムレコードの明細行データ
+ * 明細フィールドIDをキーとする1行分のデータ
+ */
+export type CustomRecordDetailRow = { [fieldId: string]: string | number | null };
+
+/**
  * カスタムレコード（customRecordsコレクション）
  * 各DBに対してデータを登録
  */
@@ -628,8 +649,11 @@ export interface CustomRecord {
   /** 組織ID */
   organizationId: string;
 
-  /** 動的フィールドデータ（フィールドIDをキーとする） */
-  data: { [fieldId: string]: string | number | null };
+  /** 単一フィールドデータ（フィールドIDをキーとする） */
+  singleData: { [fieldId: string]: CustomRecordSingleValue };
+
+  /** 明細データ（行の配列） */
+  detailRows: CustomRecordDetailRow[];
 
   /** 所有者UID */
   ownerId: string;

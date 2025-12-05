@@ -16,7 +16,14 @@ import {
   deleteDoc,
   serverTimestamp,
 } from 'firebase/firestore';
-import { Organization, CustomDatabase, CustomRecord, CustomField } from '@/types/ocr';
+import {
+  Organization,
+  CustomDatabase,
+  CustomRecord,
+  CustomField,
+  CustomRecordSingleValue,
+  CustomRecordDetailRow,
+} from '@/types/ocr';
 import {
   ArrowLeft,
   Plus,
@@ -43,6 +50,11 @@ interface CustomRecordWithId extends CustomRecord {
   id: string;
 }
 
+// フォーム用の明細行データ
+interface FormDetailRow {
+  [fieldId: string]: string | number | null;
+}
+
 export default function DatabaseRecordsPage({
   params,
 }: {
@@ -59,7 +71,8 @@ export default function DatabaseRecordsPage({
   // モーダル状態
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingRecord, setEditingRecord] = useState<CustomRecordWithId | null>(null);
-  const [formData, setFormData] = useState<{ [fieldId: string]: string | number | null }>({});
+  const [singleFormData, setSingleFormData] = useState<{ [fieldId: string]: CustomRecordSingleValue }>({});
+  const [detailRows, setDetailRows] = useState<FormDetailRow[]>([]);
   const [isSaving, setIsSaving] = useState(false);
 
   // 組織とDB情報を取得
@@ -68,7 +81,6 @@ export default function DatabaseRecordsPage({
 
     const fetchData = async () => {
       try {
-        // 組織を取得
         const orgDoc = await getDoc(doc(db, 'organizations', orgId));
         if (!orgDoc.exists()) {
           setError('組織が見つかりません');
@@ -83,7 +95,6 @@ export default function DatabaseRecordsPage({
         }
         setOrganization({ id: orgDoc.id, ...orgData });
 
-        // DBを取得
         const dbDoc = await getDoc(doc(db, 'customDatabases', databaseId));
         if (!dbDoc.exists()) {
           setError('カスタムDBが見つかりません');
@@ -118,9 +129,9 @@ export default function DatabaseRecordsPage({
     );
 
     const unsubscribe = onSnapshot(q, (snapshot) => {
-      const recs: CustomRecordWithId[] = snapshot.docs.map((doc) => ({
-        id: doc.id,
-        ...doc.data(),
+      const recs: CustomRecordWithId[] = snapshot.docs.map((docSnap) => ({
+        id: docSnap.id,
+        ...docSnap.data(),
       } as CustomRecordWithId));
       setRecords(recs);
       setIsLoading(false);
@@ -132,27 +143,58 @@ export default function DatabaseRecordsPage({
     return () => unsubscribe();
   }, [currentUser, databaseId]);
 
+  // フィールドを種別でフィルタ
+  const getSingleFields = useCallback(() => {
+    if (!database) return [];
+    return database.fields
+      .filter((f) => f.category === 'single' || !f.category)
+      .sort((a, b) => a.order - b.order);
+  }, [database]);
+
+  const getDetailFields = useCallback(() => {
+    if (!database) return [];
+    return database.fields
+      .filter((f) => f.category === 'detail')
+      .sort((a, b) => a.order - b.order);
+  }, [database]);
+
+  // 空の明細行を作成
+  const createEmptyDetailRow = useCallback((): FormDetailRow => {
+    const row: FormDetailRow = {};
+    getDetailFields().forEach((field) => {
+      row[field.id] = '';
+    });
+    return row;
+  }, [getDetailFields]);
+
   // フォームデータを初期化
   const initFormData = useCallback(() => {
-    if (!database) return {};
-    const data: { [fieldId: string]: string | number | null } = {};
-    database.fields.forEach((field) => {
-      data[field.id] = '';
+    const singleData: { [fieldId: string]: CustomRecordSingleValue } = {};
+    getSingleFields().forEach((field) => {
+      singleData[field.id] = '';
     });
-    return data;
-  }, [database]);
+    setSingleFormData(singleData);
+
+    // 明細項目がある場合は1行だけ追加
+    if (getDetailFields().length > 0) {
+      setDetailRows([createEmptyDetailRow()]);
+    } else {
+      setDetailRows([]);
+    }
+  }, [getSingleFields, getDetailFields, createEmptyDetailRow]);
 
   // モーダルを開く（新規作成）
   const handleOpenCreate = () => {
     setEditingRecord(null);
-    setFormData(initFormData());
+    initFormData();
     setIsModalOpen(true);
   };
 
   // モーダルを開く（編集）
   const handleOpenEdit = (record: CustomRecordWithId) => {
     setEditingRecord(record);
-    setFormData({ ...record.data });
+    setSingleFormData({ ...(record.singleData || {}) });
+    setDetailRows(record.detailRows?.length ? [...record.detailRows] : [createEmptyDetailRow()]);
     setIsModalOpen(true);
   };
 
@@ -160,11 +202,28 @@ export default function DatabaseRecordsPage({
   const handleCloseModal = useCallback(() => {
     setIsModalOpen(false);
     setEditingRecord(null);
-    setFormData({});
+    setSingleFormData({});
+    setDetailRows([]);
   }, []);
 
-  // フォームデータを更新
-  const handleUpdateFormData = (fieldId: string, value: string, field: CustomField) => {
+  // 単一フィールドの更新
+  const handleUpdateSingleField = (fieldId: string, value: string, field: CustomField) => {
+    let parsedValue: CustomRecordSingleValue = value;
+
+    if (field.type === 'number' || field.type === 'currency') {
+      if (value === '') {
+        parsedValue = null;
+      } else {
+        const num = parseFloat(value);
+        parsedValue = isNaN(num) ? null : num;
+      }
+    }
+
+    setSingleFormData((prev) => ({ ...prev, [fieldId]: parsedValue }));
+  };
+
+  // 明細行の更新
+  const handleUpdateDetailRow = (rowIndex: number, fieldId: string, value: string, field: CustomField) => {
     let parsedValue: string | number | null = value;
 
     if (field.type === 'number' || field.type === 'currency') {
@@ -176,7 +235,25 @@ export default function DatabaseRecordsPage({
       }
     }
 
-    setFormData((prev) => ({ ...prev, [fieldId]: parsedValue }));
+    setDetailRows((prev) => {
+      const newRows = [...prev];
+      newRows[rowIndex] = { ...newRows[rowIndex], [fieldId]: parsedValue };
+      return newRows;
+    });
+  };
+
+  // 明細行を追加
+  const handleAddDetailRow = () => {
+    setDetailRows((prev) => [...prev, createEmptyDetailRow()]);
+  };
+
+  // 明細行を削除
+  const handleRemoveDetailRow = (rowIndex: number) => {
+    if (detailRows.length <= 1) {
+      alert('最低1行は必要です');
+      return;
+    }
+    setDetailRows((prev) => prev.filter((_, i) => i !== rowIndex));
   };
 
   // 保存
@@ -184,12 +261,25 @@ export default function DatabaseRecordsPage({
     e.preventDefault();
     if (!currentUser || !database) return;
 
-    // バリデーション
-    for (const field of database.fields) {
+    // 単一フィールドのバリデーション
+    for (const field of getSingleFields()) {
       if (field.required) {
-        const value = formData[field.id];
+        const value = singleFormData[field.id];
         if (value === null || value === undefined || value === '') {
           alert(`「${field.name}」は必須項目です`);
+          return;
+        }
+      }
+    }
+
+    // 明細フィールドのバリデーション
+    const detailFieldsRequired = getDetailFields().filter((f) => f.required);
+    for (let rowIndex = 0; rowIndex < detailRows.length; rowIndex++) {
+      const row = detailRows[rowIndex];
+      for (const field of detailFieldsRequired) {
+        const value = row[field.id];
+        if (value === null || value === undefined || value === '') {
+          alert(`明細行${rowIndex + 1}の「${field.name}」は必須項目です`);
           return;
         }
       }
@@ -198,18 +288,21 @@ export default function DatabaseRecordsPage({
     setIsSaving(true);
 
     try {
+      const recordData = {
+        singleData: singleFormData,
+        detailRows: detailRows,
+      };
+
       if (editingRecord) {
-        // 更新
         await updateDoc(doc(db, 'customRecords', editingRecord.id), {
-          data: formData,
+          ...recordData,
           updatedAt: serverTimestamp(),
         });
       } else {
-        // 新規作成
         await addDoc(collection(db, 'customRecords'), {
           databaseId: databaseId,
           organizationId: orgId,
-          data: formData,
+          ...recordData,
           ownerId: currentUser.uid,
           createdAt: serverTimestamp(),
         });
@@ -253,6 +346,17 @@ export default function DatabaseRecordsPage({
     }
   };
 
+  // 明細データを1行で表示（カンマ区切り）
+  const formatDetailValues = (record: CustomRecordWithId, field: CustomField): string => {
+    if (!record.detailRows || record.detailRows.length === 0) return '-';
+    const values = record.detailRows
+      .map((row) => formatValue(row[field.id], field))
+      .filter((v) => v !== '-');
+    if (values.length === 0) return '-';
+    if (values.length <= 3) return values.join(', ');
+    return `${values.slice(0, 3).join(', ')}... (${values.length}件)`;
+  };
+
   // 入力タイプを取得
   const getInputType = (field: CustomField): string => {
     switch (field.type) {
@@ -294,8 +398,9 @@ export default function DatabaseRecordsPage({
     return null;
   }
 
-  // フィールドをソート
-  const sortedFields = [...database.fields].sort((a, b) => a.order - b.order);
+  const singleFields = getSingleFields();
+  const detailFields = getDetailFields();
+  const allFields = [...database.fields].sort((a, b) => a.order - b.order);
 
   return (
     <div>
@@ -354,12 +459,19 @@ export default function DatabaseRecordsPage({
             <table className="min-w-full divide-y divide-gray-200">
               <thead className="bg-gray-50">
                 <tr>
-                  {sortedFields.map((field) => (
+                  {allFields.map((field) => (
                     <th
                       key={field.id}
-                      className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap"
+                      className={`px-4 py-3 text-left text-xs font-medium uppercase tracking-wider whitespace-nowrap ${
+                        field.category === 'detail'
+                          ? 'text-blue-600 bg-blue-50'
+                          : 'text-gray-500'
+                      }`}
                     >
                       {field.name}
+                      {field.category === 'detail' && (
+                        <span className="ml-1 text-blue-400">(明細)</span>
+                      )}
                       {field.required && <span className="text-red-500 ml-1">*</span>}
                     </th>
                   ))}
@@ -371,10 +483,17 @@ export default function DatabaseRecordsPage({
               <tbody className="bg-white divide-y divide-gray-200">
                 {records.map((record) => (
                   <tr key={record.id} className="hover:bg-gray-50">
-                    {sortedFields.map((field) => (
-                      <td key={field.id} className="px-4 py-3 whitespace-nowrap">
+                    {allFields.map((field) => (
+                      <td
+                        key={field.id}
+                        className={`px-4 py-3 ${
+                          field.category === 'detail' ? 'bg-blue-50/30' : ''
+                        }`}
+                      >
                         <span className="text-sm text-gray-900">
-                          {formatValue(record.data[field.id], field)}
+                          {field.category === 'detail'
+                            ? formatDetailValues(record, field)
+                            : formatValue(record.singleData?.[field.id], field)}
                         </span>
                       </td>
                     ))}
@@ -410,8 +529,8 @@ export default function DatabaseRecordsPage({
       {/* モーダル */}
       {isModalOpen && (
         <div className="fixed inset-0 flex items-center justify-center z-50" style={{ backgroundColor: 'rgba(0, 0, 0, 0.1)' }}>
-          <div className="bg-white rounded-lg shadow-xl max-w-lg w-full mx-4 max-h-[90vh] overflow-y-auto">
-            <div className="flex items-center justify-between px-6 py-4 border-b sticky top-0 bg-white">
+          <div className="bg-white rounded-lg shadow-xl max-w-4xl w-full mx-4 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between px-6 py-4 border-b sticky top-0 bg-white z-10">
               <h2 className="text-lg font-semibold text-gray-900">
                 {editingRecord ? 'レコードを編集' : 'レコードを追加'}
               </h2>
@@ -423,35 +542,114 @@ export default function DatabaseRecordsPage({
               </button>
             </div>
 
-            <form onSubmit={handleSave} className="p-6 space-y-4">
-              {sortedFields.map((field) => (
-                <div key={field.id}>
-                  <label
-                    htmlFor={`field-${field.id}`}
-                    className="block text-sm font-medium text-gray-700"
-                  >
-                    {field.name}
-                    {field.required && <span className="text-red-500 ml-1">*</span>}
-                  </label>
-                  <input
-                    type={getInputType(field)}
-                    id={`field-${field.id}`}
-                    value={formData[field.id] ?? ''}
-                    onChange={(e) => handleUpdateFormData(field.id, e.target.value, field)}
-                    required={field.required}
-                    step={field.type === 'currency' || field.type === 'number' ? 'any' : undefined}
-                    className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 text-gray-900 placeholder-gray-500 shadow-sm focus:border-green-500 focus:ring-2 focus:ring-green-500"
-                  />
-                  <p className="mt-1 text-xs text-gray-500">
-                    {field.type === 'text' && 'テキスト形式'}
-                    {field.type === 'number' && '数値形式'}
-                    {field.type === 'date' && '日付形式（YYYY-MM-DD）'}
-                    {field.type === 'currency' && '金額形式（数値で入力）'}
-                  </p>
+            <form onSubmit={handleSave} className="p-6 space-y-6">
+              {/* 単一項目 */}
+              {singleFields.length > 0 && (
+                <div>
+                  <h3 className="text-sm font-semibold text-gray-700 mb-3 pb-2 border-b">
+                    基本項目
+                  </h3>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {singleFields.map((field) => (
+                      <div key={field.id}>
+                        <label
+                          htmlFor={`single-${field.id}`}
+                          className="block text-sm font-medium text-gray-700"
+                        >
+                          {field.name}
+                          {field.required && <span className="text-red-500 ml-1">*</span>}
+                        </label>
+                        <input
+                          type={getInputType(field)}
+                          id={`single-${field.id}`}
+                          value={singleFormData[field.id] ?? ''}
+                          onChange={(e) => handleUpdateSingleField(field.id, e.target.value, field)}
+                          required={field.required}
+                          step={field.type === 'currency' || field.type === 'number' ? 'any' : undefined}
+                          className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 text-gray-900 placeholder-gray-500 shadow-sm focus:border-green-500 focus:ring-2 focus:ring-green-500"
+                        />
+                      </div>
+                    ))}
+                  </div>
                 </div>
-              ))}
+              )}
 
-              <div className="flex justify-end gap-3 pt-4">
+              {/* 明細項目 */}
+              {detailFields.length > 0 && (
+                <div>
+                  <div className="flex items-center justify-between mb-3 pb-2 border-b">
+                    <h3 className="text-sm font-semibold text-blue-700">
+                      明細項目
+                    </h3>
+                    <button
+                      type="button"
+                      onClick={handleAddDetailRow}
+                      className="flex items-center gap-1 text-sm text-blue-600 hover:text-blue-800"
+                    >
+                      <Plus className="h-4 w-4" />
+                      行を追加
+                    </button>
+                  </div>
+
+                  <div className="space-y-3">
+                    {detailRows.map((row, rowIndex) => (
+                      <div
+                        key={rowIndex}
+                        className="p-4 bg-blue-50 rounded-lg border border-blue-200"
+                      >
+                        <div className="flex items-center justify-between mb-3">
+                          <span className="text-sm font-medium text-blue-700">
+                            行 {rowIndex + 1}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => handleRemoveDetailRow(rowIndex)}
+                            className="text-red-500 hover:text-red-700"
+                            title="この行を削除"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </button>
+                        </div>
+                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                          {detailFields.map((field) => (
+                            <div key={field.id}>
+                              <label
+                                htmlFor={`detail-${rowIndex}-${field.id}`}
+                                className="block text-xs font-medium text-gray-600"
+                              >
+                                {field.name}
+                                {field.required && <span className="text-red-500 ml-1">*</span>}
+                              </label>
+                              <input
+                                type={getInputType(field)}
+                                id={`detail-${rowIndex}-${field.id}`}
+                                value={row[field.id] ?? ''}
+                                onChange={(e) =>
+                                  handleUpdateDetailRow(rowIndex, field.id, e.target.value, field)
+                                }
+                                required={field.required}
+                                step={field.type === 'currency' || field.type === 'number' ? 'any' : undefined}
+                                className="mt-1 block w-full rounded-md border border-gray-300 px-2 py-1.5 text-sm text-gray-900 focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                              />
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={handleAddDetailRow}
+                    className="mt-3 w-full flex items-center justify-center gap-2 p-2 border-2 border-dashed border-blue-300 rounded-lg text-blue-500 hover:border-blue-500 hover:text-blue-600 transition-colors"
+                  >
+                    <Plus className="h-4 w-4" />
+                    明細行を追加
+                  </button>
+                </div>
+              )}
+
+              <div className="flex justify-end gap-3 pt-4 border-t">
                 <button
                   type="button"
                   onClick={handleCloseModal}
