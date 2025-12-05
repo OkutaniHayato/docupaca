@@ -1031,7 +1031,7 @@ export default function OcrSettingForm({
 
           {/* データベース選択確認ダイアログ */}
           {dbConfirmDialog.isOpen && dbConfirmDialog.selectedDb && (
-            <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+            <div className="fixed inset-0 bg-black bg-opacity-25 flex items-center justify-center z-50">
               <div className="bg-white rounded-lg shadow-xl max-w-md w-full mx-4 p-6">
                 <h3 className="text-lg font-medium text-gray-900 mb-4">
                   データベースを連携しますか？
