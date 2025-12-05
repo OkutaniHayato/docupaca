@@ -14,9 +14,10 @@ import {
   Trash2,
   BookOpen,
   Check,
-  X
+  X,
+  Database
 } from 'lucide-react';
-import { ExtractionField, Organization, OrgLearningDoc } from '@/types/ocr';
+import { ExtractionField, Organization, OrgLearningDoc, CustomDatabase } from '@/types/ocr';
 import { useAuth } from '@/context/AuthContext';
 import { db } from '@/config/firebase';
 import { collection, query, where, orderBy, onSnapshot } from 'firebase/firestore';
@@ -28,6 +29,11 @@ interface OrganizationWithId extends Organization {
 
 // ナレッジドキュメントの型（IDを含む）
 interface OrgLearningDocWithId extends OrgLearningDoc {
+  id: string;
+}
+
+// カスタムデータベースの型（IDを含む）
+interface CustomDatabaseWithId extends CustomDatabase {
   id: string;
 }
 
@@ -53,6 +59,8 @@ export interface OcrSettingFormData {
   sample_file_path?: string; // Firebase Storageのファイルパス
   // 組織（取引先）紐付け
   organization_id?: string;
+  // カスタムデータベース紐付け（抽出データの取り込み先）
+  database_id?: string;
   // AI自動判定用メタ情報（オプショナル）
   displayName?: string;
   templateType?: string;
@@ -186,6 +194,7 @@ export default function OcrSettingForm({
       prompt_text: '',
       extraction_fields: [],
       organization_id: '',
+      database_id: '',
       enableRagCodeSuggestion: false,
       linkedKnowledgeIds: [],
     }
@@ -196,6 +205,15 @@ export default function OcrSettingForm({
 
   // 選択された組織のナレッジドキュメント一覧
   const [knowledgeDocs, setKnowledgeDocs] = useState<OrgLearningDocWithId[]>([]);
+
+  // 選択された組織のカスタムデータベース一覧
+  const [customDatabases, setCustomDatabases] = useState<CustomDatabaseWithId[]>([]);
+
+  // データベース選択確認ダイアログの状態
+  const [dbConfirmDialog, setDbConfirmDialog] = useState<{
+    isOpen: boolean;
+    selectedDb: CustomDatabaseWithId | null;
+  }>({ isOpen: false, selectedDb: null });
 
   // 組織一覧を取得
   useEffect(() => {
@@ -252,6 +270,34 @@ export default function OcrSettingForm({
 
     return () => unsubscribe();
   }, [formData.organization_id, settingId]);
+
+  // 選択された組織のカスタムデータベースを取得
+  useEffect(() => {
+    if (!formData.organization_id) {
+      setCustomDatabases([]);
+      // 組織が未選択の場合はデータベースもクリア
+      if (formData.database_id) {
+        setFormData(prev => ({ ...prev, database_id: '' }));
+      }
+      return;
+    }
+
+    const q = query(
+      collection(db, 'customDatabases'),
+      where('organizationId', '==', formData.organization_id),
+      orderBy('name', 'asc')
+    );
+
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const dbs: CustomDatabaseWithId[] = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data(),
+      } as CustomDatabaseWithId));
+      setCustomDatabases(dbs);
+    });
+
+    return () => unsubscribe();
+  }, [formData.organization_id]);
 
   // initialDataが変更されたときにformDataを更新
   useEffect(() => {
@@ -421,7 +467,77 @@ export default function OcrSettingForm({
       }));
     }
   };
-  
+
+  // データベース選択時のハンドラー
+  const handleDatabaseSelect = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const dbId = e.target.value;
+
+    // データベースを解除する場合
+    if (!dbId) {
+      setFormData(prev => ({ ...prev, database_id: '' }));
+      return;
+    }
+
+    // データベースを選択する場合、確認ダイアログを表示
+    const selectedDb = customDatabases.find(db => db.id === dbId);
+    if (selectedDb) {
+      setDbConfirmDialog({ isOpen: true, selectedDb });
+    }
+  };
+
+  // データベース選択の確定
+  const handleConfirmDatabaseSelect = () => {
+    const db = dbConfirmDialog.selectedDb;
+    if (!db) return;
+
+    // データベースのフィールド定義からExtractionFieldに変換
+    const singleFields = db.fields.filter(f => f.category === 'single');
+    const detailFields = db.fields.filter(f => f.category === 'detail');
+
+    const extractionFields: ExtractionField[] = [];
+
+    // 単一フィールドを追加
+    singleFields.forEach(field => {
+      extractionFields.push({
+        name: field.name.replace(/\s+/g, ''),  // スペースを削除してフィールド名にする
+        instruction: `${field.name}を抽出してください`,
+        type: 'single',
+      });
+    });
+
+    // 明細フィールドがある場合、1つのarrayフィールドにまとめる
+    if (detailFields.length > 0) {
+      extractionFields.push({
+        name: 'lineItems',
+        instruction: '明細行を抽出してください',
+        type: 'array',
+        children: detailFields.map(field => ({
+          name: field.name.replace(/\s+/g, ''),
+          instruction: `${field.name}を抽出してください`,
+          type: 'single' as const,
+        })),
+      });
+    }
+
+    // 抽出指示を生成
+    const fieldNames = db.fields.map(f => f.name).join('、');
+    const promptText = `この帳票から以下の項目を抽出してください：${fieldNames}`;
+
+    setFormData(prev => ({
+      ...prev,
+      database_id: db.id,
+      prompt_text: promptText,
+      extraction_fields: extractionFields,
+    }));
+
+    setDbConfirmDialog({ isOpen: false, selectedDb: null });
+  };
+
+  // データベース選択のキャンセル
+  const handleCancelDatabaseSelect = () => {
+    setDbConfirmDialog({ isOpen: false, selectedDb: null });
+  };
+
   const handleAiGenerate = async () => {
     if (!uploadedFile) {
       alert("先に帳票ファイル（画像またはPDF）をアップロードしてください。");
@@ -863,6 +979,109 @@ export default function OcrSettingForm({
       {/* === 抽出設定タブ === */}
       {activeTab === 'extraction' && (
         <>
+          {/* --- データベース選択（組織が選択されている場合のみ表示） --- */}
+          {formData.organization_id && (
+            <div className="p-6 bg-white border border-gray-200 rounded-lg shadow-sm">
+              <div className="flex items-center gap-2 mb-4">
+                <Database className="h-5 w-5 text-blue-600" />
+                <h3 className="text-lg font-medium text-gray-900">データベース連携</h3>
+              </div>
+              <p className="text-sm text-gray-600 mb-4">
+                データベースを選択すると、OCR実行結果が自動的にデータベースに取り込まれます。
+              </p>
+
+              <div>
+                <label htmlFor="database_id" className="block text-sm font-medium text-gray-700">
+                  取り込み先データベース
+                </label>
+                <select
+                  id="database_id"
+                  value={formData.database_id || ''}
+                  onChange={handleDatabaseSelect}
+                  className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 text-gray-900 shadow-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-500 disabled:opacity-50"
+                  disabled={isLoading}
+                >
+                  <option value="">-- データベースを選択（任意） --</option>
+                  {customDatabases.map((db) => (
+                    <option key={db.id} value={db.id}>
+                      {db.name}
+                    </option>
+                  ))}
+                </select>
+                {customDatabases.length === 0 && (
+                  <p className="mt-1 text-xs text-gray-500">
+                    この組織にデータベースが登録されていません。
+                    <Link
+                      href={`/dashboard/organizations/${formData.organization_id}/databases/new`}
+                      className="text-blue-600 hover:underline"
+                    >
+                      データベースを作成
+                    </Link>
+                  </p>
+                )}
+                {formData.database_id && (
+                  <p className="mt-1 text-xs text-green-600 flex items-center gap-1">
+                    <Check className="h-3 w-3" />
+                    データベースが選択されています。抽出項目はデータベースのフィールドに合わせて設定されています。
+                  </p>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* データベース選択確認ダイアログ */}
+          {dbConfirmDialog.isOpen && dbConfirmDialog.selectedDb && (
+            <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+              <div className="bg-white rounded-lg shadow-xl max-w-md w-full mx-4 p-6">
+                <h3 className="text-lg font-medium text-gray-900 mb-4">
+                  データベースを連携しますか？
+                </h3>
+                <p className="text-sm text-gray-600 mb-4">
+                  データベース「<span className="font-medium">{dbConfirmDialog.selectedDb.name}</span>」を選択すると、
+                  抽出項目がデータベースのフィールド構造に合わせて書き換えられます。
+                </p>
+                <div className="bg-yellow-50 border border-yellow-200 rounded-md p-3 mb-4">
+                  <p className="text-sm text-yellow-800">
+                    現在設定されている抽出指示と抽出項目は上書きされます。この操作は取り消せません。
+                  </p>
+                </div>
+                <div className="bg-gray-50 rounded-md p-3 mb-4">
+                  <p className="text-xs text-gray-600 mb-2">データベースのフィールド:</p>
+                  <ul className="text-sm text-gray-700 space-y-1">
+                    {dbConfirmDialog.selectedDb.fields.map((field) => (
+                      <li key={field.id} className="flex items-center gap-2">
+                        <span className={`inline-block px-1.5 py-0.5 rounded text-xs font-medium ${
+                          field.category === 'single'
+                            ? 'bg-gray-100 text-gray-700'
+                            : 'bg-green-100 text-green-700'
+                        }`}>
+                          {field.category === 'single' ? '単一' : '明細'}
+                        </span>
+                        <span>{field.name}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+                <div className="flex justify-end gap-3">
+                  <button
+                    type="button"
+                    onClick={handleCancelDatabaseSelect}
+                    className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-md hover:bg-gray-200"
+                  >
+                    キャンセル
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleConfirmDatabaseSelect}
+                    className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-md hover:bg-blue-700"
+                  >
+                    連携する
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* --- 2. 抽出指示 (AI) エリア --- */}
       <div className="p-6 bg-white border border-gray-200 rounded-lg shadow-sm">
         <div className="flex justify-between items-center">
