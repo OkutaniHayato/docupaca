@@ -617,7 +617,7 @@ export default function OcrSettingForm({
           </select>
           {organizations.length === 0 && (
             <p className="mt-1 text-xs text-gray-500">
-              組織が登録されていません。<a href="/dashboard/organizations" className="text-green-600 hover:underline">組織マスタ</a>から登録してください。
+              組織が登録されていません。<Link href="/dashboard/organizations" className="text-green-600 hover:underline">組織マスタ</Link>から登録してください。
             </p>
           )}
         </div>

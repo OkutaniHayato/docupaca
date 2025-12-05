@@ -22,7 +22,6 @@ import {
   CustomRecord,
   CustomField,
   CustomRecordSingleValue,
-  CustomRecordDetailRow,
 } from '@/types/ocr';
 import {
   ArrowLeft,
