@@ -346,17 +346,6 @@ export default function DatabaseRecordsPage({
     }
   };
 
-  // 明細データを1行で表示（カンマ区切り）
-  const formatDetailValues = (record: CustomRecordWithId, field: CustomField): string => {
-    if (!record.detailRows || record.detailRows.length === 0) return '-';
-    const values = record.detailRows
-      .map((row) => formatValue(row[field.id], field))
-      .filter((v) => v !== '-');
-    if (values.length === 0) return '-';
-    if (values.length <= 3) return values.join(', ');
-    return `${values.slice(0, 3).join(', ')}... (${values.length}件)`;
-  };
-
   // 入力タイプを取得
   const getInputType = (field: CustomField): string => {
     switch (field.type) {
@@ -481,40 +470,75 @@ export default function DatabaseRecordsPage({
                 </tr>
               </thead>
               <tbody className="bg-white divide-y divide-gray-200">
-                {records.map((record) => (
-                  <tr key={record.id} className="hover:bg-gray-50">
-                    {allFields.map((field) => (
-                      <td
-                        key={field.id}
-                        className={`px-4 py-3 ${
-                          field.category === 'detail' ? 'bg-blue-50/30' : ''
-                        }`}
-                      >
-                        <span className="text-sm text-gray-900">
-                          {field.category === 'detail'
-                            ? formatDetailValues(record, field)
-                            : formatValue(record.singleData?.[field.id], field)}
-                        </span>
-                      </td>
-                    ))}
-                    <td className="px-4 py-3 whitespace-nowrap text-right">
-                      <button
-                        onClick={() => handleOpenEdit(record)}
-                        className="text-green-600 hover:text-green-900 mr-3"
-                        title="編集"
-                      >
-                        <Pencil className="h-4 w-4" />
-                      </button>
-                      <button
-                        onClick={() => handleDelete(record)}
-                        className="text-red-600 hover:text-red-900"
-                        title="削除"
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </button>
-                    </td>
-                  </tr>
-                ))}
+                {records.map((record) => {
+                  // 明細行の数を計算（最低1行）
+                  const detailRowCount = Math.max(1, record.detailRows?.length || 0);
+
+                  return Array.from({ length: detailRowCount }).map((_, rowIndex) => (
+                    <tr
+                      key={`${record.id}-${rowIndex}`}
+                      className={`hover:bg-gray-50 ${
+                        rowIndex > 0 ? 'border-t border-gray-100' : ''
+                      }`}
+                    >
+                      {allFields.map((field) => {
+                        if (field.category === 'detail') {
+                          // 明細フィールド: 各行に値を表示
+                          const detailValue = record.detailRows?.[rowIndex]?.[field.id];
+                          return (
+                            <td
+                              key={field.id}
+                              className="px-4 py-2 bg-blue-50/30"
+                            >
+                              <span className="text-sm text-gray-900">
+                                {formatValue(detailValue, field)}
+                              </span>
+                            </td>
+                          );
+                        } else {
+                          // 単一フィールド: 最初の行のみ表示（rowSpan使用）
+                          if (rowIndex === 0) {
+                            return (
+                              <td
+                                key={field.id}
+                                rowSpan={detailRowCount}
+                                className="px-4 py-3 align-top"
+                              >
+                                <span className="text-sm text-gray-900">
+                                  {formatValue(record.singleData?.[field.id], field)}
+                                </span>
+                              </td>
+                            );
+                          }
+                          // 2行目以降は単一フィールドのセルを出力しない（rowSpanで結合されている）
+                          return null;
+                        }
+                      })}
+                      {/* 操作ボタン: 最初の行のみ表示 */}
+                      {rowIndex === 0 && (
+                        <td
+                          rowSpan={detailRowCount}
+                          className="px-4 py-3 whitespace-nowrap text-right align-top"
+                        >
+                          <button
+                            onClick={() => handleOpenEdit(record)}
+                            className="text-green-600 hover:text-green-900 mr-3"
+                            title="編集"
+                          >
+                            <Pencil className="h-4 w-4" />
+                          </button>
+                          <button
+                            onClick={() => handleDelete(record)}
+                            className="text-red-600 hover:text-red-900"
+                            title="削除"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </button>
+                        </td>
+                      )}
+                    </tr>
+                  ));
+                })}
               </tbody>
             </table>
           </div>
