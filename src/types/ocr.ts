@@ -560,3 +560,83 @@ export interface LearningHistory {
     minOccurrenceCount: number;
   };
 }
+
+// ================================
+// カスタムDB機能の型定義
+// ================================
+
+/**
+ * カスタムDBのフィールドデータ型
+ */
+export type CustomFieldType = 'text' | 'number' | 'date' | 'currency';
+
+/**
+ * カスタムDBのフィールド定義
+ */
+export interface CustomField {
+  /** フィールドID（UUID） */
+  id: string;
+
+  /** フィールド名（表示名） */
+  name: string;
+
+  /** データ型 */
+  type: CustomFieldType;
+
+  /** 必須項目かどうか */
+  required: boolean;
+
+  /** 表示順序 */
+  order: number;
+}
+
+/**
+ * カスタムDB定義（customDatabasesコレクション）
+ * 組織ごとに複数作成可能
+ */
+export interface CustomDatabase {
+  /** 組織ID（organizationsのドキュメントID） */
+  organizationId: string;
+
+  /** DB名 */
+  name: string;
+
+  /** 説明 */
+  description?: string;
+
+  /** フィールド定義配列 */
+  fields: CustomField[];
+
+  /** 所有者UID */
+  ownerId: string;
+
+  /** 作成日時 */
+  createdAt: FirebaseFirestore.Timestamp | Date;
+
+  /** 更新日時 */
+  updatedAt?: FirebaseFirestore.Timestamp | Date;
+}
+
+/**
+ * カスタムレコード（customRecordsコレクション）
+ * 各DBに対してデータを登録
+ */
+export interface CustomRecord {
+  /** カスタムDBのドキュメントID */
+  databaseId: string;
+
+  /** 組織ID */
+  organizationId: string;
+
+  /** 動的フィールドデータ（フィールドIDをキーとする） */
+  data: { [fieldId: string]: string | number | null };
+
+  /** 所有者UID */
+  ownerId: string;
+
+  /** 作成日時 */
+  createdAt: FirebaseFirestore.Timestamp | Date;
+
+  /** 更新日時 */
+  updatedAt?: FirebaseFirestore.Timestamp | Date;
+}

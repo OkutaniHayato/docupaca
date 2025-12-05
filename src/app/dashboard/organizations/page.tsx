@@ -23,8 +23,11 @@ import {
   Trash2,
   X,
   Save,
-  Loader2
+  Loader2,
+  ChevronRight,
+  Database
 } from 'lucide-react';
+import Link from 'next/link';
 
 interface OrganizationWithId extends Organization {
   id: string;
@@ -182,6 +185,9 @@ export default function OrganizationsPage() {
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                   説明
                 </th>
+                <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  カスタムDB
+                </th>
                 <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
                   操作
                 </th>
@@ -191,17 +197,30 @@ export default function OrganizationsPage() {
               {organizations.map((org) => (
                 <tr key={org.id} className="hover:bg-gray-50">
                   <td className="px-6 py-4 whitespace-nowrap">
-                    <div className="flex items-center">
-                      <Building2 className="h-5 w-5 text-gray-400 mr-3" />
-                      <span className="text-sm font-medium text-gray-900">
+                    <Link
+                      href={`/dashboard/organizations/${org.id}`}
+                      className="flex items-center group"
+                    >
+                      <Building2 className="h-5 w-5 text-gray-400 mr-3 group-hover:text-green-600" />
+                      <span className="text-sm font-medium text-gray-900 group-hover:text-green-600">
                         {org.name}
                       </span>
-                    </div>
+                      <ChevronRight className="h-4 w-4 text-gray-400 ml-2 opacity-0 group-hover:opacity-100 transition-opacity" />
+                    </Link>
                   </td>
                   <td className="px-6 py-4">
                     <span className="text-sm text-gray-500">
                       {org.description || '-'}
                     </span>
+                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap text-center">
+                    <Link
+                      href={`/dashboard/organizations/${org.id}`}
+                      className="inline-flex items-center gap-1 text-sm text-green-600 hover:text-green-800"
+                    >
+                      <Database className="h-4 w-4" />
+                      <span>管理</span>
+                    </Link>
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-right">
                     <button
