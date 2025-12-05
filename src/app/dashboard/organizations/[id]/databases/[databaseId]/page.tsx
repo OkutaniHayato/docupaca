@@ -496,22 +496,17 @@ export default function DatabaseRecordsPage({
                             </td>
                           );
                         } else {
-                          // 単一フィールド: 最初の行のみ表示（rowSpan使用）
-                          if (rowIndex === 0) {
-                            return (
-                              <td
-                                key={field.id}
-                                rowSpan={detailRowCount}
-                                className="px-4 py-3 align-top"
-                              >
-                                <span className="text-sm text-gray-900">
-                                  {formatValue(record.singleData?.[field.id], field)}
-                                </span>
-                              </td>
-                            );
-                          }
-                          // 2行目以降は単一フィールドのセルを出力しない（rowSpanで結合されている）
-                          return null;
+                          // 単一フィールド: 各行に同じ値を表示
+                          return (
+                            <td
+                              key={field.id}
+                              className="px-4 py-2"
+                            >
+                              <span className="text-sm text-gray-900">
+                                {formatValue(record.singleData?.[field.id], field)}
+                              </span>
+                            </td>
+                          );
                         }
                       })}
                       {/* 操作ボタン: 最初の行のみ表示 */}
