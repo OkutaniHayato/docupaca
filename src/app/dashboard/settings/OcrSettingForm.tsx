@@ -117,7 +117,7 @@ const PreviewContent = ({
             type="button"
             onClick={onAnalyze}
             disabled={isAnalyzing}
-            className="flex items-center gap-2 rounded-lg bg-green-700 py-2 px-4 font-semibold text-white hover:bg-green-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            className="flex items-center gap-2 rounded-lg bg-green-700 py-2 px-4 font-semibold text-white hover:bg-green-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors cursor-pointer"
           >
             <Sparkles className={`h-4 w-4 ${isAnalyzing ? 'animate-spin' : ''}`} />
             {isAnalyzing ? 'AI解析中...' : 'AIで自動生成'}
@@ -669,7 +669,7 @@ export default function OcrSettingForm({
           <button
             type="button"
             onClick={() => setActiveTab('basic')}
-            className={`whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm ${
+            className={`whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm cursor-pointer ${
               activeTab === 'basic'
                 ? 'border-green-500 text-green-600'
                 : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
@@ -680,7 +680,7 @@ export default function OcrSettingForm({
           <button
             type="button"
             onClick={() => setActiveTab('extraction')}
-            className={`whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm ${
+            className={`whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm cursor-pointer ${
               activeTab === 'extraction'
                 ? 'border-green-500 text-green-600'
                 : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
@@ -721,7 +721,7 @@ export default function OcrSettingForm({
             id="organization_id"
             value={formData.organization_id || ''}
             onChange={handleChange}
-            className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 text-gray-900 shadow-sm focus:border-green-500 focus:ring-2 focus:ring-green-500 disabled:opacity-50"
+            className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 text-gray-900 shadow-sm focus:border-green-500 focus:ring-2 focus:ring-green-500 disabled:opacity-50 cursor-pointer"
             disabled={isLoading}
           >
             <option value="">-- 組織を選択 --</option>
@@ -746,7 +746,7 @@ export default function OcrSettingForm({
             id="model_name"
             value={formData.model_name}
             onChange={handleChange}
-            className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 text-gray-900 shadow-sm focus:border-green-500 focus:ring-2 focus:ring-green-500 disabled:opacity-50"
+            className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 text-gray-900 shadow-sm focus:border-green-500 focus:ring-2 focus:ring-green-500 disabled:opacity-50 cursor-pointer"
             disabled={isLoading}
           >
             <option value="gemini-2.5-flash-lite">Gemini 2.5 Flash-Lite (推奨)</option>
@@ -833,7 +833,7 @@ export default function OcrSettingForm({
                                   const newIds = (formData.linkedKnowledgeIds || []).filter(id => id !== doc.id);
                                   setFormData(prev => ({ ...prev, linkedKnowledgeIds: newIds }));
                                 }}
-                                className="hover:opacity-70"
+                                className="hover:opacity-70 cursor-pointer"
                                 disabled={isLoading}
                               >
                                 <X className="h-3 w-3" />
@@ -868,7 +868,7 @@ export default function OcrSettingForm({
                                   : (formData.linkedKnowledgeIds || []).filter(id => id !== doc.id);
                                 setFormData(prev => ({ ...prev, linkedKnowledgeIds: newIds }));
                               }}
-                              className="h-4 w-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                              className="h-4 w-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500 cursor-pointer"
                               disabled={isLoading}
                             />
                             <div className="flex-1 min-w-0 flex items-center gap-2">
@@ -998,7 +998,7 @@ export default function OcrSettingForm({
                   id="database_id"
                   value={formData.database_id || ''}
                   onChange={handleDatabaseSelect}
-                  className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 text-gray-900 shadow-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-500 disabled:opacity-50"
+                  className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 text-gray-900 shadow-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-500 disabled:opacity-50 cursor-pointer"
                   disabled={isLoading}
                 >
                   <option value="">-- データベースを選択（任意） --</option>
@@ -1091,7 +1091,7 @@ export default function OcrSettingForm({
           <button
             type="button"
             onClick={handleAiGenerate}
-            className="flex items-center text-sm text-green-700 hover:text-green-600 disabled:opacity-50"
+            className="flex items-center text-sm text-green-700 hover:text-green-600 disabled:opacity-50 cursor-pointer"
             disabled={isLoading || !uploadedFile || isAnalyzing}
             title={!uploadedFile ? "先にファイルをアップロードしてください" : "AIで抽出指示を自動生成"}
           >
@@ -1119,7 +1119,7 @@ export default function OcrSettingForm({
           <button
             type="button"
             onClick={handleAiGenerate}
-            className="flex items-center text-sm text-green-700 hover:text-green-600 disabled:opacity-50"
+            className="flex items-center text-sm text-green-700 hover:text-green-600 disabled:opacity-50 cursor-pointer"
             disabled={isLoading || !uploadedFile || isAnalyzing}
             title={!uploadedFile ? "先にファイルをアップロードしてください" : "AIで抽出指示を自動生成"}
           >
@@ -1133,24 +1133,24 @@ export default function OcrSettingForm({
             フィールドタイプ
           </label>
           <div className="flex gap-4">
-            <label className="flex items-center">
+            <label className="flex items-center cursor-pointer">
               <input
                 type="radio"
                 value="single"
                 checked={newFieldType === 'single'}
                 onChange={(e) => setNewFieldType(e.target.value as 'single' | 'array')}
-                className="mr-2"
+                className="mr-2 cursor-pointer"
                 disabled={isLoading}
               />
               <span className="text-sm text-gray-700">単一値</span>
             </label>
-            <label className="flex items-center">
+            <label className="flex items-center cursor-pointer">
               <input
                 type="radio"
                 value="array"
                 checked={newFieldType === 'array'}
                 onChange={(e) => setNewFieldType(e.target.value as 'single' | 'array')}
-                className="mr-2"
+                className="mr-2 cursor-pointer"
                 disabled={isLoading}
               />
               <span className="text-sm text-gray-700">配列（繰り返し項目）</span>
@@ -1195,7 +1195,7 @@ export default function OcrSettingForm({
                     <button
                       type="button"
                       onClick={() => handleDeleteChildField(child.name)}
-                      className="ml-2 text-red-600 hover:text-red-800"
+                      className="ml-2 text-red-600 hover:text-red-800 cursor-pointer"
                       disabled={isLoading}
                     >
                       <Trash2 className="h-4 w-4" />
@@ -1227,7 +1227,7 @@ export default function OcrSettingForm({
             <button
               type="button"
               onClick={handleAddChildField}
-              className="mt-2 flex items-center gap-1 rounded-md bg-green-600 py-1.5 px-3 text-sm font-semibold text-white hover:bg-green-500 disabled:opacity-50"
+              className="mt-2 flex items-center gap-1 rounded-md bg-green-600 py-1.5 px-3 text-sm font-semibold text-white hover:bg-green-500 disabled:opacity-50 cursor-pointer"
               disabled={isLoading}
             >
               <Plus className="h-4 w-4" />
@@ -1240,7 +1240,7 @@ export default function OcrSettingForm({
         <button
           type="button"
           onClick={handleAddField}
-          className="mt-4 shrink-0 rounded-lg bg-gray-600 py-2 px-4 font-semibold text-white hover:bg-gray-500 disabled:opacity-50"
+          className="mt-4 shrink-0 rounded-lg bg-gray-600 py-2 px-4 font-semibold text-white hover:bg-gray-500 disabled:opacity-50 cursor-pointer"
           disabled={isLoading}
         >
           フィールドを追加
@@ -1271,7 +1271,7 @@ export default function OcrSettingForm({
                               <button
                                 type="button"
                                 onClick={() => toggleFieldExpansion(field.name)}
-                                className="text-gray-600 hover:text-gray-900"
+                                className="text-gray-600 hover:text-gray-900 cursor-pointer"
                               >
                                 {expandedFields.has(field.name) ? (
                                   <ChevronDown className="h-4 w-4" />
@@ -1295,7 +1295,7 @@ export default function OcrSettingForm({
                           <button
                             type="button"
                             onClick={() => handleDeleteField(field.name)}
-                            className="text-red-600 hover:text-red-900 disabled:opacity-50"
+                            className="text-red-600 hover:text-red-900 disabled:opacity-50 cursor-pointer"
                             disabled={isLoading}
                           >
                             <Trash2 className="h-4 w-4" />
@@ -1347,13 +1347,13 @@ export default function OcrSettingForm({
       <div className="flex justify-end space-x-4">
         <Link
           href="/dashboard/settings"
-          className={`rounded-lg bg-gray-200 py-2 px-4 font-semibold text-gray-700 hover:bg-gray-300 ${isLoading ? 'pointer-events-none opacity-50' : ''}`}
+          className={`rounded-lg bg-gray-200 py-2 px-4 font-semibold text-gray-700 hover:bg-gray-300 cursor-pointer ${isLoading ? 'pointer-events-none opacity-50' : ''}`}
         >
           キャンセル
         </Link>
         <button
           type="submit"
-          className="rounded-lg bg-green-800 py-2 px-4 font-semibold text-white hover:bg-green-700 disabled:opacity-50"
+          className="rounded-lg bg-green-800 py-2 px-4 font-semibold text-white hover:bg-green-700 disabled:opacity-50 cursor-pointer"
           disabled={isLoading}
         >
           {isLoading ? `${saveButtonText}中...` : saveButtonText}
@@ -1367,7 +1367,7 @@ export default function OcrSettingForm({
       <div className="mb-4 text-right">
         <button
           onClick={() => setLayout(layout === 'form-left' ? 'form-right' : 'form-left')}
-          className="inline-flex items-center rounded-md bg-gray-200 px-3 py-1 text-sm font-medium text-gray-700 hover:bg-gray-300"
+          className="inline-flex items-center rounded-md bg-gray-200 px-3 py-1 text-sm font-medium text-gray-700 hover:bg-gray-300 cursor-pointer"
         >
           <ArrowLeftRight className="mr-2 h-4 w-4" />
           レイアウト切り替え
