@@ -136,7 +136,7 @@ const PreviewContent = ({
           accept="image/*,application/pdf"
           onChange={handleFileChange}
           disabled={isAnalyzing}
-          className="mt-1 block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-green-100 file:text-green-800 hover:file:bg-green-200 disabled:opacity-50"
+          className="mt-1 block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-green-100 file:text-green-800 hover:file:bg-green-200 file:cursor-pointer cursor-pointer disabled:opacity-50"
         />
       </div>
 
