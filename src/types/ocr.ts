@@ -267,6 +267,9 @@ export interface OcrSetting {
   /** 組織ID（紐づく組織のドキュメントID） */
   organization_id?: string;
 
+  /** カスタムデータベースID（抽出データの取り込み先） */
+  database_id?: string;
+
   /** プロンプトテキスト */
   prompt_text: string;
 

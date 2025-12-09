@@ -14,9 +14,10 @@ import {
   Trash2,
   BookOpen,
   Check,
-  X
+  X,
+  Database
 } from 'lucide-react';
-import { ExtractionField, Organization, OrgLearningDoc } from '@/types/ocr';
+import { ExtractionField, Organization, OrgLearningDoc, CustomDatabase } from '@/types/ocr';
 import { useAuth } from '@/context/AuthContext';
 import { db } from '@/config/firebase';
 import { collection, query, where, orderBy, onSnapshot } from 'firebase/firestore';
@@ -28,6 +29,11 @@ interface OrganizationWithId extends Organization {
 
 // ナレッジドキュメントの型（IDを含む）
 interface OrgLearningDocWithId extends OrgLearningDoc {
+  id: string;
+}
+
+// カスタムデータベースの型（IDを含む）
+interface CustomDatabaseWithId extends CustomDatabase {
   id: string;
 }
 
@@ -53,6 +59,8 @@ export interface OcrSettingFormData {
   sample_file_path?: string; // Firebase Storageのファイルパス
   // 組織（取引先）紐付け
   organization_id?: string;
+  // カスタムデータベース紐付け（抽出データの取り込み先）
+  database_id?: string;
   // AI自動判定用メタ情報（オプショナル）
   displayName?: string;
   templateType?: string;
@@ -109,7 +117,7 @@ const PreviewContent = ({
             type="button"
             onClick={onAnalyze}
             disabled={isAnalyzing}
-            className="flex items-center gap-2 rounded-lg bg-green-700 py-2 px-4 font-semibold text-white hover:bg-green-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            className="flex items-center gap-2 rounded-lg bg-green-700 py-2 px-4 font-semibold text-white hover:bg-green-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors cursor-pointer"
           >
             <Sparkles className={`h-4 w-4 ${isAnalyzing ? 'animate-spin' : ''}`} />
             {isAnalyzing ? 'AI解析中...' : 'AIで自動生成'}
@@ -128,7 +136,7 @@ const PreviewContent = ({
           accept="image/*,application/pdf"
           onChange={handleFileChange}
           disabled={isAnalyzing}
-          className="mt-1 block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-green-100 file:text-green-800 hover:file:bg-green-200 disabled:opacity-50"
+          className="mt-1 block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-green-100 file:text-green-800 hover:file:bg-green-200 file:cursor-pointer cursor-pointer disabled:opacity-50"
         />
       </div>
 
@@ -186,6 +194,7 @@ export default function OcrSettingForm({
       prompt_text: '',
       extraction_fields: [],
       organization_id: '',
+      database_id: '',
       enableRagCodeSuggestion: false,
       linkedKnowledgeIds: [],
     }
@@ -196,6 +205,15 @@ export default function OcrSettingForm({
 
   // 選択された組織のナレッジドキュメント一覧
   const [knowledgeDocs, setKnowledgeDocs] = useState<OrgLearningDocWithId[]>([]);
+
+  // 選択された組織のカスタムデータベース一覧
+  const [customDatabases, setCustomDatabases] = useState<CustomDatabaseWithId[]>([]);
+
+  // データベース選択確認ダイアログの状態
+  const [dbConfirmDialog, setDbConfirmDialog] = useState<{
+    isOpen: boolean;
+    selectedDb: CustomDatabaseWithId | null;
+  }>({ isOpen: false, selectedDb: null });
 
   // 組織一覧を取得
   useEffect(() => {
@@ -252,6 +270,34 @@ export default function OcrSettingForm({
 
     return () => unsubscribe();
   }, [formData.organization_id, settingId]);
+
+  // 選択された組織のカスタムデータベースを取得
+  useEffect(() => {
+    if (!formData.organization_id) {
+      setCustomDatabases([]);
+      // 組織が未選択の場合はデータベースもクリア
+      if (formData.database_id) {
+        setFormData(prev => ({ ...prev, database_id: '' }));
+      }
+      return;
+    }
+
+    const q = query(
+      collection(db, 'customDatabases'),
+      where('organizationId', '==', formData.organization_id),
+      orderBy('name', 'asc')
+    );
+
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const dbs: CustomDatabaseWithId[] = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data(),
+      } as CustomDatabaseWithId));
+      setCustomDatabases(dbs);
+    });
+
+    return () => unsubscribe();
+  }, [formData.organization_id]);
 
   // initialDataが変更されたときにformDataを更新
   useEffect(() => {
@@ -421,7 +467,77 @@ export default function OcrSettingForm({
       }));
     }
   };
-  
+
+  // データベース選択時のハンドラー
+  const handleDatabaseSelect = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const dbId = e.target.value;
+
+    // データベースを解除する場合
+    if (!dbId) {
+      setFormData(prev => ({ ...prev, database_id: '' }));
+      return;
+    }
+
+    // データベースを選択する場合、確認ダイアログを表示
+    const selectedDb = customDatabases.find(db => db.id === dbId);
+    if (selectedDb) {
+      setDbConfirmDialog({ isOpen: true, selectedDb });
+    }
+  };
+
+  // データベース選択の確定
+  const handleConfirmDatabaseSelect = () => {
+    const db = dbConfirmDialog.selectedDb;
+    if (!db) return;
+
+    // データベースのフィールド定義からExtractionFieldに変換
+    const singleFields = db.fields.filter(f => f.category === 'single');
+    const detailFields = db.fields.filter(f => f.category === 'detail');
+
+    const extractionFields: ExtractionField[] = [];
+
+    // 単一フィールドを追加
+    singleFields.forEach(field => {
+      extractionFields.push({
+        name: field.name.replace(/\s+/g, ''),  // スペースを削除してフィールド名にする
+        instruction: `${field.name}を抽出してください`,
+        type: 'single',
+      });
+    });
+
+    // 明細フィールドがある場合、1つのarrayフィールドにまとめる
+    if (detailFields.length > 0) {
+      extractionFields.push({
+        name: 'lineItems',
+        instruction: '明細行を抽出してください',
+        type: 'array',
+        children: detailFields.map(field => ({
+          name: field.name.replace(/\s+/g, ''),
+          instruction: `${field.name}を抽出してください`,
+          type: 'single' as const,
+        })),
+      });
+    }
+
+    // 抽出指示を生成
+    const fieldNames = db.fields.map(f => f.name).join('、');
+    const promptText = `この帳票から以下の項目を抽出してください：${fieldNames}`;
+
+    setFormData(prev => ({
+      ...prev,
+      database_id: db.id,
+      prompt_text: promptText,
+      extraction_fields: extractionFields,
+    }));
+
+    setDbConfirmDialog({ isOpen: false, selectedDb: null });
+  };
+
+  // データベース選択のキャンセル
+  const handleCancelDatabaseSelect = () => {
+    setDbConfirmDialog({ isOpen: false, selectedDb: null });
+  };
+
   const handleAiGenerate = async () => {
     if (!uploadedFile) {
       alert("先に帳票ファイル（画像またはPDF）をアップロードしてください。");
@@ -553,7 +669,7 @@ export default function OcrSettingForm({
           <button
             type="button"
             onClick={() => setActiveTab('basic')}
-            className={`whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm ${
+            className={`whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm cursor-pointer ${
               activeTab === 'basic'
                 ? 'border-green-500 text-green-600'
                 : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
@@ -564,7 +680,7 @@ export default function OcrSettingForm({
           <button
             type="button"
             onClick={() => setActiveTab('extraction')}
-            className={`whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm ${
+            className={`whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm cursor-pointer ${
               activeTab === 'extraction'
                 ? 'border-green-500 text-green-600'
                 : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
@@ -605,7 +721,7 @@ export default function OcrSettingForm({
             id="organization_id"
             value={formData.organization_id || ''}
             onChange={handleChange}
-            className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 text-gray-900 shadow-sm focus:border-green-500 focus:ring-2 focus:ring-green-500 disabled:opacity-50"
+            className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 text-gray-900 shadow-sm focus:border-green-500 focus:ring-2 focus:ring-green-500 disabled:opacity-50 cursor-pointer"
             disabled={isLoading}
           >
             <option value="">-- 組織を選択 --</option>
@@ -630,7 +746,7 @@ export default function OcrSettingForm({
             id="model_name"
             value={formData.model_name}
             onChange={handleChange}
-            className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 text-gray-900 shadow-sm focus:border-green-500 focus:ring-2 focus:ring-green-500 disabled:opacity-50"
+            className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 text-gray-900 shadow-sm focus:border-green-500 focus:ring-2 focus:ring-green-500 disabled:opacity-50 cursor-pointer"
             disabled={isLoading}
           >
             <option value="gemini-2.5-flash-lite">Gemini 2.5 Flash-Lite (推奨)</option>
@@ -717,7 +833,7 @@ export default function OcrSettingForm({
                                   const newIds = (formData.linkedKnowledgeIds || []).filter(id => id !== doc.id);
                                   setFormData(prev => ({ ...prev, linkedKnowledgeIds: newIds }));
                                 }}
-                                className="hover:opacity-70"
+                                className="hover:opacity-70 cursor-pointer"
                                 disabled={isLoading}
                               >
                                 <X className="h-3 w-3" />
@@ -752,7 +868,7 @@ export default function OcrSettingForm({
                                   : (formData.linkedKnowledgeIds || []).filter(id => id !== doc.id);
                                 setFormData(prev => ({ ...prev, linkedKnowledgeIds: newIds }));
                               }}
-                              className="h-4 w-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                              className="h-4 w-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500 cursor-pointer"
                               disabled={isLoading}
                             />
                             <div className="flex-1 min-w-0 flex items-center gap-2">
@@ -863,6 +979,109 @@ export default function OcrSettingForm({
       {/* === 抽出設定タブ === */}
       {activeTab === 'extraction' && (
         <>
+          {/* --- データベース選択（組織が選択されている場合のみ表示） --- */}
+          {formData.organization_id && (
+            <div className="p-6 bg-white border border-gray-200 rounded-lg shadow-sm">
+              <div className="flex items-center gap-2 mb-4">
+                <Database className="h-5 w-5 text-blue-600" />
+                <h3 className="text-lg font-medium text-gray-900">データベース連携</h3>
+              </div>
+              <p className="text-sm text-gray-600 mb-4">
+                データベースを選択すると、OCR実行結果が自動的にデータベースに取り込まれます。
+              </p>
+
+              <div>
+                <label htmlFor="database_id" className="block text-sm font-medium text-gray-700">
+                  取り込み先データベース
+                </label>
+                <select
+                  id="database_id"
+                  value={formData.database_id || ''}
+                  onChange={handleDatabaseSelect}
+                  className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 text-gray-900 shadow-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-500 disabled:opacity-50 cursor-pointer"
+                  disabled={isLoading}
+                >
+                  <option value="">-- データベースを選択（任意） --</option>
+                  {customDatabases.map((db) => (
+                    <option key={db.id} value={db.id}>
+                      {db.name}
+                    </option>
+                  ))}
+                </select>
+                {customDatabases.length === 0 && (
+                  <p className="mt-1 text-xs text-gray-500">
+                    この組織にデータベースが登録されていません。
+                    <Link
+                      href={`/dashboard/organizations/${formData.organization_id}/databases/new`}
+                      className="text-blue-600 hover:underline"
+                    >
+                      データベースを作成
+                    </Link>
+                  </p>
+                )}
+                {formData.database_id && (
+                  <p className="mt-1 text-xs text-green-600 flex items-center gap-1">
+                    <Check className="h-3 w-3" />
+                    データベースが選択されています。抽出項目はデータベースのフィールドに合わせて設定されています。
+                  </p>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* データベース選択確認ダイアログ */}
+          {dbConfirmDialog.isOpen && dbConfirmDialog.selectedDb && (
+            <div className="fixed inset-0 bg-black/25 backdrop-blur-sm flex items-center justify-center z-50">
+              <div className="bg-white rounded-lg shadow-xl max-w-md w-full mx-4 p-6">
+                <h3 className="text-lg font-medium text-gray-900 mb-4">
+                  データベースを連携しますか？
+                </h3>
+                <p className="text-sm text-gray-600 mb-4">
+                  データベース「<span className="font-medium">{dbConfirmDialog.selectedDb.name}</span>」を選択すると、
+                  抽出項目がデータベースのフィールド構造に合わせて書き換えられます。
+                </p>
+                <div className="bg-yellow-50 border border-yellow-200 rounded-md p-3 mb-4">
+                  <p className="text-sm text-yellow-800">
+                    現在設定されている抽出指示と抽出項目は上書きされます。この操作は取り消せません。
+                  </p>
+                </div>
+                <div className="bg-gray-50 rounded-md p-3 mb-4">
+                  <p className="text-xs text-gray-600 mb-2">データベースのフィールド:</p>
+                  <ul className="text-sm text-gray-700 space-y-1">
+                    {dbConfirmDialog.selectedDb.fields.map((field) => (
+                      <li key={field.id} className="flex items-center gap-2">
+                        <span className={`inline-block px-1.5 py-0.5 rounded text-xs font-medium ${
+                          field.category === 'single'
+                            ? 'bg-gray-100 text-gray-700'
+                            : 'bg-green-100 text-green-700'
+                        }`}>
+                          {field.category === 'single' ? '単一' : '明細'}
+                        </span>
+                        <span>{field.name}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+                <div className="flex justify-end gap-3">
+                  <button
+                    type="button"
+                    onClick={handleCancelDatabaseSelect}
+                    className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-md hover:bg-gray-200 cursor-pointer"
+                  >
+                    キャンセル
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleConfirmDatabaseSelect}
+                    className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-md hover:bg-blue-700 cursor-pointer"
+                  >
+                    連携する
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* --- 2. 抽出指示 (AI) エリア --- */}
       <div className="p-6 bg-white border border-gray-200 rounded-lg shadow-sm">
         <div className="flex justify-between items-center">
@@ -872,7 +1091,7 @@ export default function OcrSettingForm({
           <button
             type="button"
             onClick={handleAiGenerate}
-            className="flex items-center text-sm text-green-700 hover:text-green-600 disabled:opacity-50"
+            className="flex items-center text-sm text-green-700 hover:text-green-600 disabled:opacity-50 cursor-pointer"
             disabled={isLoading || !uploadedFile || isAnalyzing}
             title={!uploadedFile ? "先にファイルをアップロードしてください" : "AIで抽出指示を自動生成"}
           >
@@ -900,7 +1119,7 @@ export default function OcrSettingForm({
           <button
             type="button"
             onClick={handleAiGenerate}
-            className="flex items-center text-sm text-green-700 hover:text-green-600 disabled:opacity-50"
+            className="flex items-center text-sm text-green-700 hover:text-green-600 disabled:opacity-50 cursor-pointer"
             disabled={isLoading || !uploadedFile || isAnalyzing}
             title={!uploadedFile ? "先にファイルをアップロードしてください" : "AIで抽出指示を自動生成"}
           >
@@ -914,24 +1133,24 @@ export default function OcrSettingForm({
             フィールドタイプ
           </label>
           <div className="flex gap-4">
-            <label className="flex items-center">
+            <label className="flex items-center cursor-pointer">
               <input
                 type="radio"
                 value="single"
                 checked={newFieldType === 'single'}
                 onChange={(e) => setNewFieldType(e.target.value as 'single' | 'array')}
-                className="mr-2"
+                className="mr-2 cursor-pointer"
                 disabled={isLoading}
               />
               <span className="text-sm text-gray-700">単一値</span>
             </label>
-            <label className="flex items-center">
+            <label className="flex items-center cursor-pointer">
               <input
                 type="radio"
                 value="array"
                 checked={newFieldType === 'array'}
                 onChange={(e) => setNewFieldType(e.target.value as 'single' | 'array')}
-                className="mr-2"
+                className="mr-2 cursor-pointer"
                 disabled={isLoading}
               />
               <span className="text-sm text-gray-700">配列（繰り返し項目）</span>
@@ -976,7 +1195,7 @@ export default function OcrSettingForm({
                     <button
                       type="button"
                       onClick={() => handleDeleteChildField(child.name)}
-                      className="ml-2 text-red-600 hover:text-red-800"
+                      className="ml-2 text-red-600 hover:text-red-800 cursor-pointer"
                       disabled={isLoading}
                     >
                       <Trash2 className="h-4 w-4" />
@@ -1008,7 +1227,7 @@ export default function OcrSettingForm({
             <button
               type="button"
               onClick={handleAddChildField}
-              className="mt-2 flex items-center gap-1 rounded-md bg-green-600 py-1.5 px-3 text-sm font-semibold text-white hover:bg-green-500 disabled:opacity-50"
+              className="mt-2 flex items-center gap-1 rounded-md bg-green-600 py-1.5 px-3 text-sm font-semibold text-white hover:bg-green-500 disabled:opacity-50 cursor-pointer"
               disabled={isLoading}
             >
               <Plus className="h-4 w-4" />
@@ -1021,7 +1240,7 @@ export default function OcrSettingForm({
         <button
           type="button"
           onClick={handleAddField}
-          className="mt-4 shrink-0 rounded-lg bg-gray-600 py-2 px-4 font-semibold text-white hover:bg-gray-500 disabled:opacity-50"
+          className="mt-4 shrink-0 rounded-lg bg-gray-600 py-2 px-4 font-semibold text-white hover:bg-gray-500 disabled:opacity-50 cursor-pointer"
           disabled={isLoading}
         >
           フィールドを追加
@@ -1052,7 +1271,7 @@ export default function OcrSettingForm({
                               <button
                                 type="button"
                                 onClick={() => toggleFieldExpansion(field.name)}
-                                className="text-gray-600 hover:text-gray-900"
+                                className="text-gray-600 hover:text-gray-900 cursor-pointer"
                               >
                                 {expandedFields.has(field.name) ? (
                                   <ChevronDown className="h-4 w-4" />
@@ -1076,7 +1295,7 @@ export default function OcrSettingForm({
                           <button
                             type="button"
                             onClick={() => handleDeleteField(field.name)}
-                            className="text-red-600 hover:text-red-900 disabled:opacity-50"
+                            className="text-red-600 hover:text-red-900 disabled:opacity-50 cursor-pointer"
                             disabled={isLoading}
                           >
                             <Trash2 className="h-4 w-4" />
@@ -1128,13 +1347,13 @@ export default function OcrSettingForm({
       <div className="flex justify-end space-x-4">
         <Link
           href="/dashboard/settings"
-          className={`rounded-lg bg-gray-200 py-2 px-4 font-semibold text-gray-700 hover:bg-gray-300 ${isLoading ? 'pointer-events-none opacity-50' : ''}`}
+          className={`rounded-lg bg-gray-200 py-2 px-4 font-semibold text-gray-700 hover:bg-gray-300 cursor-pointer ${isLoading ? 'pointer-events-none opacity-50' : ''}`}
         >
           キャンセル
         </Link>
         <button
           type="submit"
-          className="rounded-lg bg-green-800 py-2 px-4 font-semibold text-white hover:bg-green-700 disabled:opacity-50"
+          className="rounded-lg bg-green-800 py-2 px-4 font-semibold text-white hover:bg-green-700 disabled:opacity-50 cursor-pointer"
           disabled={isLoading}
         >
           {isLoading ? `${saveButtonText}中...` : saveButtonText}
@@ -1148,7 +1367,7 @@ export default function OcrSettingForm({
       <div className="mb-4 text-right">
         <button
           onClick={() => setLayout(layout === 'form-left' ? 'form-right' : 'form-left')}
-          className="inline-flex items-center rounded-md bg-gray-200 px-3 py-1 text-sm font-medium text-gray-700 hover:bg-gray-300"
+          className="inline-flex items-center rounded-md bg-gray-200 px-3 py-1 text-sm font-medium text-gray-700 hover:bg-gray-300 cursor-pointer"
         >
           <ArrowLeftRight className="mr-2 h-4 w-4" />
           レイアウト切り替え
