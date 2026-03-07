@@ -41,21 +41,71 @@ async function parsePdf(buffer: Buffer): Promise<string> {
  */
 function parseExcel(buffer: Buffer): string {
   try {
-    const workbook = XLSX.read(buffer, { type: 'buffer' });
+    console.log(`Excel解析開始: バッファサイズ ${buffer.length} bytes`);
+
+    // メモリ効率的なオプション
+    const workbook = XLSX.read(buffer, {
+      type: 'buffer',
+      cellFormula: false, // 数式を保持しない
+      cellStyles: false,  // スタイル情報を保持しない
+    });
+
     const results: string[] = [];
+    const MAX_SHEETS = 10; // 処理するシート数の上限
+    const MAX_ROWS_PER_SHEET = 5000; // シートあたりの最大行数
 
-    for (const sheetName of workbook.SheetNames) {
+    console.log(`シート数: ${workbook.SheetNames.length}`);
+
+    for (let i = 0; i < Math.min(workbook.SheetNames.length, MAX_SHEETS); i++) {
+      const sheetName = workbook.SheetNames[i];
       const sheet = workbook.Sheets[sheetName];
-      const data = XLSX.utils.sheet_to_csv(sheet, { blankrows: false });
 
-      if (data.trim()) {
-        results.push(`## シート: ${sheetName}\n\n${data}`);
+      try {
+        // シートの行数をチェック
+        const range = XLSX.utils.decode_range(sheet['!ref'] || 'A1');
+        const rowCount = range.e.r - range.s.r + 1;
+        console.log(`シート "${sheetName}": ${rowCount} 行`);
+
+        // 行数が多い場合は制限
+        let csvData: string;
+        if (rowCount > MAX_ROWS_PER_SHEET) {
+          console.log(`  → 行数制限適用: 最初の${MAX_ROWS_PER_SHEET}行のみ処理`);
+          const limitedSheet = XLSX.utils.sheet_to_json(sheet, {
+            header: 1,
+            range: `A1:AMJ${MAX_ROWS_PER_SHEET + 1}`
+          });
+          csvData = limitedSheet.map((row: any[]) =>
+            row.map((cell) => {
+              if (typeof cell === 'string') {
+                return `"${cell.replace(/"/g, '""')}"`;
+              }
+              return String(cell ?? '');
+            }).join(',')
+          ).join('\n');
+        } else {
+          csvData = XLSX.utils.sheet_to_csv(sheet, { blankrows: false });
+        }
+
+        if (csvData.trim()) {
+          results.push(`## シート: ${sheetName}\n\n${csvData}`);
+        }
+      } catch (sheetError) {
+        console.warn(`シート "${sheetName}" の処理エラー:`, sheetError);
+        // シート処理エラーは無視して続行
       }
     }
 
+    if (workbook.SheetNames.length > MAX_SHEETS) {
+      results.push(`\n**注: ${workbook.SheetNames.length - MAX_SHEETS}個のシートは処理されませんでした**`);
+    }
+
+    console.log(`Excel解析完了: ${results.join('\n\n').length} 文字`);
     return results.join('\n\n');
   } catch (error) {
     console.error('Excel解析エラー:', error);
+    if (error instanceof Error) {
+      console.error('エラー詳細:', error.message, error.stack);
+    }
     throw new Error('Excelファイルの解析に失敗しました');
   }
 }
