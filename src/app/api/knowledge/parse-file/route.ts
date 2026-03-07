@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { adminAuth } from '@/config/firebase-admin';
 import { GoogleGenerativeAI } from '@google/generative-ai';
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+import XLSX from 'xlsx';
 
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || '';
 const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
@@ -28,9 +30,6 @@ async function parsePdf(buffer: Buffer): Promise<string> {
 async function parseExcel(buffer: Buffer): Promise<string> {
   try {
     console.log(`Excel解析開始: バッファサイズ ${buffer.length} bytes`);
-
-    // 動的インポートでxlsxを読み込み
-    const XLSX = await import('xlsx');
 
     // メモリ効率的なオプション
     const workbook = XLSX.read(buffer, {
