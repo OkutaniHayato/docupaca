@@ -21,9 +21,14 @@ const nextConfig: NextConfig = {
   ],
   webpack: (config, { isServer }) => {
     if (isServer) {
-      config.externals = config.externals || [];
+      // externals を object 形式で設定（webpack の仕様に合わせる）
       if (typeof config.externals !== 'function') {
-        config.externals = [config.externals || {}, 'xlsx', 'pdf-parse', 'csv-parse'];
+        config.externals = {
+          ...(typeof config.externals === 'object' ? config.externals : {}),
+          'xlsx': 'xlsx',
+          'pdf-parse': 'pdf-parse',
+          'csv-parse': 'csv-parse',
+        };
       }
     }
     return config;
