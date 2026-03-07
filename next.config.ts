@@ -17,6 +17,13 @@ const nextConfig: NextConfig = {
     'sharp',
     'xlsx',
   ],
+  webpack: (config, { isServer }) => {
+    if (isServer) {
+      config.externals = config.externals || [];
+      config.externals.push('xlsx', 'pdf-parse');
+    }
+    return config;
+  },
 };
 
 export default nextConfig;
