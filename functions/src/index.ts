@@ -802,17 +802,27 @@ ${jsonSchemaExample}
           for (const [fieldName, fieldValue] of Object.entries(pageDataWithPageNumber)) {
             if (allExtractedData[fieldName]) {
               // 既存のフィールドがある場合、配列フィールドならマージ
-              const existing = allExtractedData[fieldName] as Record<string, unknown>;
-              const newValue = fieldValue as Record<string, unknown>;
+              const existing = allExtractedData[fieldName];
+              const newValue = fieldValue;
 
-              if (Array.isArray(existing.items) && Array.isArray(newValue.items)) {
-                // 配列フィールドの場合、itemsをマージ
-                existing.items = [...existing.items, ...newValue.items];
-              } else if ('value' in existing && 'value' in newValue) {
-                // 単一値フィールドの場合、ページごとに配列に変換
-                allExtractedData[fieldName] = {
-                  items: [existing, newValue],
-                };
+              // existingとnewValueが両方ともオブジェクトであることを確認
+              if (
+                existing && typeof existing === 'object' &&
+                newValue && typeof newValue === 'object' &&
+                !Array.isArray(existing) && !Array.isArray(newValue)
+              ) {
+                const existingObj = existing as Record<string, unknown>;
+                const newValueObj = newValue as Record<string, unknown>;
+
+                if (Array.isArray(existingObj.items) && Array.isArray(newValueObj.items)) {
+                  // 配列フィールドの場合、itemsをマージ
+                  existingObj.items = [...existingObj.items, ...newValueObj.items];
+                } else if ('value' in existingObj && 'value' in newValueObj) {
+                  // 単一値フィールドの場合、ページごとに配列に変換
+                  allExtractedData[fieldName] = {
+                    items: [existingObj, newValueObj],
+                  };
+                }
               }
             } else {
               allExtractedData[fieldName] = fieldValue;
