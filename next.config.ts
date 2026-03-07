@@ -15,6 +15,7 @@ const nextConfig: NextConfig = {
   serverExternalPackages: [
     '@google/generative-ai',
     'sharp',
+    'xlsx',
   ],
 };
 
