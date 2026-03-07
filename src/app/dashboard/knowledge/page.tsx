@@ -402,17 +402,45 @@ export default function KnowledgePage() {
         sourceFileSize = selectedFile.size;
       }
 
+      // コンテンツサイズをチェック（Firestore のフィールド制限: ~1MB）
+      const contentSize = new Blob([content.trim()]).size;
+      const MAX_CONTENT_SIZE = 900000; // 900KB に制限（安全マージン）
+      let contentToSave = content.trim();
+      let contentUrl: string | undefined;
+
+      if (contentSize > MAX_CONTENT_SIZE) {
+        // コンテンツが大きい場合は Cloud Storage に保存
+        try {
+          const timestamp = Date.now();
+          const contentFileName = `content_${timestamp}_${Math.random().toString(36).substring(7)}.txt`;
+          const contentRef = ref(storage, `content/${contentFileName}`);
+          await uploadBytes(contentRef, new Blob([content.trim()]));
+          contentUrl = await getDownloadURL(contentRef);
+          // content フィールドには最初の 1000 文字だけ保存
+          contentToSave = content.trim().substring(0, 1000);
+        } catch (uploadError) {
+          console.error('コンテンツのアップロードエラー:', uploadError);
+          setUploadError(`コンテンツが大きすぎます（${Math.round(contentSize / 1024 / 1024)}MB）。900KB以下にしてください。`);
+          setIsSaving(false);
+          return;
+        }
+      }
+
       if (editingDoc) {
         // 更新
         const updateData: Record<string, unknown> = {
           type: formData.type,
           title: formData.title.trim(),
-          content: content.trim(),
+          content: contentToSave,
           updatedAt: serverTimestamp(),
           updatedBy: currentUser.uid,
           syncStatus: 'pending',
           sourceType: inputMode,
         };
+
+        if (contentUrl) {
+          updateData.contentUrl = contentUrl;
+        }
 
         // ファイル情報がある場合は追加
         if (sourceFileUrl) {
@@ -429,7 +457,7 @@ export default function KnowledgePage() {
           orgId: selectedOrgId,
           type: formData.type,
           title: formData.title.trim(),
-          content: content.trim(),
+          content: contentToSave,
           createdAt: serverTimestamp(),
           updatedAt: serverTimestamp(),
           createdBy: currentUser.uid,
@@ -437,6 +465,10 @@ export default function KnowledgePage() {
           sourceType: inputMode,
           syncEnabled: true,
         };
+
+        if (contentUrl) {
+          newDoc.contentUrl = contentUrl;
+        }
 
         // ファイル情報がある場合は追加
         if (sourceFileUrl) {
