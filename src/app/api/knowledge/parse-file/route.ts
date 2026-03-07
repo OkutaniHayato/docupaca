@@ -29,20 +29,23 @@ async function parsePdf(buffer: Buffer): Promise<string> {
  */
 async function parseExcel(buffer: Buffer): Promise<string> {
   try {
-    console.log(`Excel解析開始: バッファサイズ ${buffer.length} bytes`);
+    console.log(`[XLSX] 解析開始: バッファサイズ ${buffer.length} bytes`);
+    console.log(`[XLSX] XLSX オブジェクト利用可能:`, typeof XLSX !== 'undefined');
 
     // メモリ効率的なオプション
+    console.log(`[XLSX] XLSX.read() を呼び出し中...`);
     const workbook = XLSX.read(buffer, {
       type: 'buffer',
-      cellFormula: false, // 数式を保持しない
-      cellStyles: false,  // スタイル情報を保持しない
+      cellFormula: false,
+      cellStyles: false,
     });
+    console.log(`[XLSX] XLSX.read() 完了`);
 
     const results: string[] = [];
-    const MAX_SHEETS = 10; // 処理するシート数の上限
-    const MAX_ROWS_PER_SHEET = 5000; // シートあたりの最大行数
+    const MAX_SHEETS = 10;
+    const MAX_ROWS_PER_SHEET = 5000;
 
-    console.log(`シート数: ${workbook.SheetNames.length}`);
+    console.log(`[XLSX] シート数: ${workbook.SheetNames.length}`);
 
     for (let i = 0; i < Math.min(workbook.SheetNames.length, MAX_SHEETS); i++) {
       const sheetName = workbook.SheetNames[i];
@@ -50,14 +53,15 @@ async function parseExcel(buffer: Buffer): Promise<string> {
 
       try {
         if (!sheet['!ref']) {
-          console.log(`シート "${sheetName}": 空のシート、スキップ`);
+          console.log(`[XLSX] シート "${sheetName}": 空のシート、スキップ`);
           continue;
         }
 
         // シートの行数をチェック
+        console.log(`[XLSX] XLSX.utils.decode_range() を呼び出し中...`);
         const range = XLSX.utils.decode_range(sheet['!ref']);
         const rowCount = range.e.r - range.s.r + 1;
-        console.log(`シート "${sheetName}": ${rowCount} 行`);
+        console.log(`[XLSX] シート "${sheetName}": ${rowCount} 行`);
 
         // 行数が多い場合は制限
         let csvData: string;
