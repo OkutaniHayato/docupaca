@@ -10,10 +10,8 @@ const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
  */
 async function parsePdf(buffer: Buffer): Promise<string> {
   try {
-    // 動的インポートでpdf-parseを読み込み
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const pdfParseModule = await import('pdf-parse') as any;
-    const pdfParse = pdfParseModule.default || pdfParseModule;
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const pdfParse = require('pdf-parse');
     const data = await pdfParse(buffer);
     return data.text.trim();
   } catch (error) {
@@ -29,10 +27,8 @@ async function parseExcel(buffer: Buffer): Promise<string> {
   try {
     console.log(`[XLSX] 解析開始: バッファサイズ ${buffer.length} bytes`);
 
-    // 動的インポートでxlsxを読み込み
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const XLSXModule = await import('xlsx') as any;
-    const XLSX = XLSXModule.default || XLSXModule;
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const XLSX = require('xlsx');
     console.log(`[XLSX] XLSX モジュール読み込み完了`);
 
     // メモリ効率的なオプション
@@ -114,8 +110,8 @@ async function parseCsv(buffer: Buffer): Promise<string> {
   try {
     const content = buffer.toString('utf-8');
 
-    // 動的インポートでcsv-parseを読み込み
-    const { parse: csvParse } = await import('csv-parse/sync');
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { parse: csvParse } = require('csv-parse/sync');
 
     // CSVをパース
     const records = csvParse(content, {
