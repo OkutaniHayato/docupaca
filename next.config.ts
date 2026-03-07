@@ -16,11 +16,15 @@ const nextConfig: NextConfig = {
     '@google/generative-ai',
     'sharp',
     'xlsx',
+    'pdf-parse',
+    'csv-parse',
   ],
   webpack: (config, { isServer }) => {
     if (isServer) {
       config.externals = config.externals || [];
-      config.externals.push('xlsx', 'pdf-parse');
+      if (typeof config.externals !== 'function') {
+        config.externals = [config.externals || {}, 'xlsx', 'pdf-parse', 'csv-parse'];
+      }
     }
     return config;
   },
