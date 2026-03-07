@@ -61,8 +61,13 @@ function parseExcel(buffer: Buffer): string {
       const sheet = workbook.Sheets[sheetName];
 
       try {
+        if (!sheet['!ref']) {
+          console.log(`シート "${sheetName}": 空のシート、スキップ`);
+          continue;
+        }
+
         // シートの行数をチェック
-        const range = XLSX.utils.decode_range(sheet['!ref'] || 'A1');
+        const range = XLSX.utils.decode_range(sheet['!ref']);
         const rowCount = range.e.r - range.s.r + 1;
         console.log(`シート "${sheetName}": ${rowCount} 行`);
 
@@ -70,18 +75,12 @@ function parseExcel(buffer: Buffer): string {
         let csvData: string;
         if (rowCount > MAX_ROWS_PER_SHEET) {
           console.log(`  → 行数制限適用: 最初の${MAX_ROWS_PER_SHEET}行のみ処理`);
-          const limitedSheet = XLSX.utils.sheet_to_json(sheet, {
-            header: 1,
+          // sheet_to_csvで安全に変換
+          const limitedSheet = XLSX.utils.sheet_to_csv(sheet, {
+            blankrows: false,
             range: `A1:AMJ${MAX_ROWS_PER_SHEET + 1}`
           });
-          csvData = limitedSheet.map((row: any[]) =>
-            row.map((cell) => {
-              if (typeof cell === 'string') {
-                return `"${cell.replace(/"/g, '""')}"`;
-              }
-              return String(cell ?? '');
-            }).join(',')
-          ).join('\n');
+          csvData = limitedSheet;
         } else {
           csvData = XLSX.utils.sheet_to_csv(sheet, { blankrows: false });
         }
@@ -90,7 +89,10 @@ function parseExcel(buffer: Buffer): string {
           results.push(`## シート: ${sheetName}\n\n${csvData}`);
         }
       } catch (sheetError) {
-        console.warn(`シート "${sheetName}" の処理エラー:`, sheetError);
+        console.error(`シート "${sheetName}" の処理エラー:`, sheetError);
+        if (sheetError instanceof Error) {
+          console.error('  詳細:', sheetError.message);
+        }
         // シート処理エラーは無視して続行
       }
     }
