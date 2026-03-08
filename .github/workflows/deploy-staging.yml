@@ -48,9 +48,24 @@ jobs:
 
       - name: Deploy to Firebase Hosting (Staging)
         run: |
+          # firebase.json から frameworksBackend を一時的に削除
+          node -e "
+            const fs = require('fs');
+            const config = JSON.parse(fs.readFileSync('firebase.json', 'utf8'));
+            if (config.hosting && config.hosting.frameworksBackend) {
+              delete config.hosting.frameworksBackend;
+            }
+            fs.writeFileSync('firebase.json.tmp', JSON.stringify(config, null, 2));
+          "
+
+          # ホスティングのみをデプロイ
           firebase deploy \
             --only hosting \
-            --project=${{ secrets.STAGING_FIREBASE_PROJECT_ID }}
+            --project=${{ secrets.STAGING_FIREBASE_PROJECT_ID }} \
+            --config firebase.json.tmp
+
+          # 元のファイルを復元
+          rm firebase.json.tmp
         env:
           FIREBASE_CLI_EXPERIMENTS: webframeworks
           GOOGLE_APPLICATION_CREDENTIALS: /tmp/firebase-key.json
