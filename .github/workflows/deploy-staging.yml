@@ -53,7 +53,11 @@ jobs:
           credentials_json: '${{ secrets.STAGING_FIREBASE_SERVICE_ACCOUNT }}'
 
       - name: Deploy to Firebase
-        run: npx firebase-tools deploy --only hosting,functions --project ${{ secrets.STAGING_FIREBASE_PROJECT_ID }} --force
+        run: |
+          export GOOGLE_APPLICATION_CREDENTIALS="${{ steps.auth.outputs.credentials_file_path }}"
+          npx firebase-tools deploy --only hosting,functions \
+            --project ${{ secrets.STAGING_FIREBASE_PROJECT_ID }} \
+            --force
         env:
           FIREBASE_CLI_EXPERIMENTS: webframeworks
 
