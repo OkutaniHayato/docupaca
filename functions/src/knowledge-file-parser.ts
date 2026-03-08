@@ -75,12 +75,11 @@ function parseExcel(buffer: Buffer): string {
         let csvData: string;
         if (rowCount > MAX_ROWS_PER_SHEET) {
           console.log(`  → 行数制限適用: 最初の${MAX_ROWS_PER_SHEET}行のみ処理`);
-          // sheet_to_csvで安全に変換
-          const limitedSheet = XLSX.utils.sheet_to_csv(sheet, {
-            blankrows: false,
-            range: `A1:AMJ${MAX_ROWS_PER_SHEET + 1}`
-          });
-          csvData = limitedSheet;
+          // 最初のN行だけを含む新しいシートを作成
+          const sheetData = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' })
+            .slice(0, MAX_ROWS_PER_SHEET + 1) as string[][];
+          const limitedSheet = XLSX.utils.aoa_to_sheet(sheetData);
+          csvData = XLSX.utils.sheet_to_csv(limitedSheet, { blankrows: false });
         } else {
           csvData = XLSX.utils.sheet_to_csv(sheet, { blankrows: false });
         }
