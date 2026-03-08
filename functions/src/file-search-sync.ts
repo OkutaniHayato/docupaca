@@ -14,6 +14,11 @@ import * as admin from 'firebase-admin';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { defineSecret } from 'firebase-functions/params';
 
+// Firebase Admin初期化
+if (!admin.apps.length) {
+  admin.initializeApp();
+}
+
 // Gemini APIキーをSecret Managerから取得
 const geminiApiKey = defineSecret('GEMINI_API_KEY');
 
