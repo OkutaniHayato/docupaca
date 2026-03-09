@@ -52,6 +52,15 @@ jobs:
         with:
           credentials_json: '${{ secrets.STAGING_FIREBASE_SERVICE_ACCOUNT }}'
 
+      - name: Grant Secret Manager access to Service Account
+        run: |
+          SERVICE_ACCOUNT_EMAIL=$(cat "${{ steps.auth.outputs.credentials_file_path }}" | jq -r '.client_email')
+          echo "Granting Secret Manager access to $SERVICE_ACCOUNT_EMAIL"
+          gcloud secrets add-iam-policy-binding GEMINI_API_KEY \
+            --member=serviceAccount:$SERVICE_ACCOUNT_EMAIL \
+            --role=roles/secretmanager.secretAccessor \
+            --project=${{ secrets.STAGING_FIREBASE_PROJECT_ID }} || echo "Warning: Failed to grant IAM policy, but continuing..."
+
       - name: Test Secret Manager access
         run: gcloud secrets describe GEMINI_API_KEY --project=${{ secrets.STAGING_FIREBASE_PROJECT_ID }}
 
