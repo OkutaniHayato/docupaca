@@ -52,6 +52,9 @@ jobs:
         with:
           credentials_json: '${{ secrets.STAGING_FIREBASE_SERVICE_ACCOUNT }}'
 
+      - name: Test Secret Manager access
+        run: gcloud secrets describe GEMINI_API_KEY --project=${{ secrets.STAGING_FIREBASE_PROJECT_ID }}
+
       - name: Deploy to Firebase
         run: |
           export GOOGLE_APPLICATION_CREDENTIALS="${{ steps.auth.outputs.credentials_file_path }}"
