@@ -15,6 +15,9 @@ const nextConfig: NextConfig = {
   serverExternalPackages: [
     '@google/generative-ai',
     'sharp',
+    'xlsx',
+    'pdf-parse',
+    'csv-parse',
   ],
 };
 

@@ -10,10 +10,8 @@ const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
  */
 async function parsePdf(buffer: Buffer): Promise<string> {
   try {
-    // 動的インポートでpdf-parseを読み込み
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const pdfParseModule = await import('pdf-parse') as any;
-    const pdfParse = pdfParseModule.default || pdfParseModule;
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const pdfParse = require('pdf-parse');
     const data = await pdfParse(buffer);
     return data.text.trim();
   } catch (error) {
@@ -27,23 +25,80 @@ async function parsePdf(buffer: Buffer): Promise<string> {
  */
 async function parseExcel(buffer: Buffer): Promise<string> {
   try {
-    // 動的インポートでxlsxを読み込み
-    const XLSX = await import('xlsx');
-    const workbook = XLSX.read(buffer, { type: 'buffer' });
+    console.log(`[XLSX] 解析開始: バッファサイズ ${buffer.length} bytes`);
+
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const XLSX = require('xlsx');
+    console.log(`[XLSX] XLSX モジュール読み込み完了`);
+
+    // メモリ効率的なオプション
+    console.log(`[XLSX] XLSX.read() を呼び出し中...`);
+    const workbook = XLSX.read(buffer, {
+      type: 'buffer',
+      cellFormula: false,
+      cellStyles: false,
+    });
+    console.log(`[XLSX] XLSX.read() 完了`);
+
     const results: string[] = [];
+    const MAX_SHEETS = 10;
+    const MAX_ROWS_PER_SHEET = 5000;
 
-    for (const sheetName of workbook.SheetNames) {
+    console.log(`[XLSX] シート数: ${workbook.SheetNames.length}`);
+
+    for (let i = 0; i < Math.min(workbook.SheetNames.length, MAX_SHEETS); i++) {
+      const sheetName = workbook.SheetNames[i];
       const sheet = workbook.Sheets[sheetName];
-      const data = XLSX.utils.sheet_to_csv(sheet, { blankrows: false });
 
-      if (data.trim()) {
-        results.push(`## シート: ${sheetName}\n\n${data}`);
+      try {
+        if (!sheet['!ref']) {
+          console.log(`[XLSX] シート "${sheetName}": 空のシート、スキップ`);
+          continue;
+        }
+
+        // シートの行数をチェック
+        console.log(`[XLSX] XLSX.utils.decode_range() を呼び出し中...`);
+        const range = XLSX.utils.decode_range(sheet['!ref']);
+        const rowCount = range.e.r - range.s.r + 1;
+        console.log(`[XLSX] シート "${sheetName}": ${rowCount} 行`);
+
+        // 行数が多い場合は制限
+        let csvData: string;
+        if (rowCount > MAX_ROWS_PER_SHEET) {
+          console.log(`  → 行数制限適用: 最初の${MAX_ROWS_PER_SHEET}行のみ処理`);
+          // sheet_to_csvで安全に変換
+          const limitedSheet = XLSX.utils.sheet_to_csv(sheet, {
+            blankrows: false,
+            range: `A1:AMJ${MAX_ROWS_PER_SHEET + 1}`
+          });
+          csvData = limitedSheet;
+        } else {
+          csvData = XLSX.utils.sheet_to_csv(sheet, { blankrows: false });
+        }
+
+        if (csvData.trim()) {
+          results.push(`## シート: ${sheetName}\n\n${csvData}`);
+        }
+      } catch (sheetError) {
+        console.error(`シート "${sheetName}" の処理エラー:`, sheetError);
+        if (sheetError instanceof Error) {
+          console.error('  詳細:', sheetError.message);
+        }
+        // シート処理エラーは無視して続行
       }
     }
 
+    if (workbook.SheetNames.length > MAX_SHEETS) {
+      results.push(`\n**注: ${workbook.SheetNames.length - MAX_SHEETS}個のシートは処理されませんでした**`);
+    }
+
+    console.log(`Excel解析完了: ${results.join('\n\n').length} 文字`);
     return results.join('\n\n');
   } catch (error) {
     console.error('Excel解析エラー:', error);
+    if (error instanceof Error) {
+      console.error('エラー詳細:', error.message, error.stack);
+    }
     throw new Error('Excelファイルの解析に失敗しました');
   }
 }
@@ -55,8 +110,8 @@ async function parseCsv(buffer: Buffer): Promise<string> {
   try {
     const content = buffer.toString('utf-8');
 
-    // 動的インポートでcsv-parseを読み込み
-    const { parse: csvParse } = await import('csv-parse/sync');
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { parse: csvParse } = require('csv-parse/sync');
 
     // CSVをパース
     const records = csvParse(content, {
